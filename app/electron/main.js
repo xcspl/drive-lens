@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEmbedder } from "./embedder.js";
-import { info, openIndex, search } from "./search.js";
+import { browse, info, openIndex, search } from "./search.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const settingsFile = () => path.join(app.getPath("userData"), "settings.json");
@@ -71,6 +71,13 @@ ipcMain.handle("model:status", () => model);
 ipcMain.handle("search", async (_e, q, opts) => {
   try {
     return { ok: true, results: await search(String(q || ""), opts || {}) };
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+});
+ipcMain.handle("browse", (_e, opts) => {
+  try {
+    return { ok: true, ...browse(opts || {}) };
   } catch (e) {
     return { ok: false, error: String(e?.message || e) };
   }

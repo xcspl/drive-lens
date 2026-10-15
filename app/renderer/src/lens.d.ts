@@ -18,6 +18,7 @@ declare global {
       modelStatus(): Promise<ModelState>;
       onModel(fn: (m: ModelState) => void): () => void;
       search(q: string, opts?: { k?: number; kind?: string }): Promise<{ ok: boolean; results?: Result[]; error?: string }>;
+      browse(opts?: { kind?: string; offset?: number; limit?: number }): Promise<{ ok: boolean; total?: number; results?: Result[]; error?: string }>;
       open(url: string): Promise<void>;
     };
   }

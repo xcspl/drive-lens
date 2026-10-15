@@ -108,23 +108,35 @@ export async function search(q, { k = 60, kind = "" } = {}) {
   }
   const ranked = [...scores.keys()].sort((a, b) => scores.get(b) - scores.get(a));
   const getFile = db.prepare("SELECT rowid, * FROM files WHERE rowid = ?");
-  const getThumb = db.prepare("SELECT jpeg FROM thumbs WHERE rowid = ?");
   const out = [];
   for (const rowid of ranked) {
     const f = getFile.get(rowid);
     if (!f || (kind && f.kind !== kind)) continue;
-    const t = getThumb.get(rowid);
-    const slash = f.path.lastIndexOf("/");
-    out.push({
-      id: f.id, name: f.name, kind: f.kind, status: f.status,
-      folder: slash > 0 ? f.path.slice(0, slash) : "",
-      title: f.title || "", description: f.description || "", tags: JSON.parse(f.tags || "[]"),
-      textInImage: f.text_in_image || "", sensitive: !!f.sensitive,
-      url: fileUrl(f.id), folderUrl: f.parent_id ? folderUrl(f.parent_id) : "",
-      thumb: t ? `data:image/jpeg;base64,${Buffer.from(t.jpeg).toString("base64")}` : "",
-      score: +scores.get(rowid).toFixed(5), why: why.get(rowid),
-    });
+    out.push({ ...toResult(f), score: +scores.get(rowid).toFixed(5), why: why.get(rowid) });
     if (out.length >= k) break;
   }
   return out;
+}
+
+/** The files already looked at, folder by folder, a page at a time (no query). */
+export function browse({ kind = "", offset = 0, limit = 60 } = {}) {
+  if (!db) return { total: 0, results: [] };
+  const where = "status = 'done'" + (kind ? " AND kind = ?" : "");
+  const args = kind ? [kind] : [];
+  const total = db.prepare(`SELECT COUNT(*) n FROM files WHERE ${where}`).get(...args).n;
+  const rows = db.prepare(`SELECT rowid, * FROM files WHERE ${where} ORDER BY path LIMIT ? OFFSET ?`).all(...args, limit, offset);
+  return { total, results: rows.map((f) => ({ ...toResult(f), score: 0, why: [] })) };
+}
+
+function toResult(f) {
+  const t = db.prepare("SELECT jpeg FROM thumbs WHERE rowid = ?").get(f.rowid);
+  const slash = f.path.lastIndexOf("/");
+  return {
+    id: f.id, name: f.name, kind: f.kind, status: f.status,
+    folder: slash > 0 ? f.path.slice(0, slash) : "",
+    title: f.title || "", description: f.description || "", tags: JSON.parse(f.tags || "[]"),
+    textInImage: f.text_in_image || "", sensitive: !!f.sensitive,
+    url: fileUrl(f.id), folderUrl: f.parent_id ? folderUrl(f.parent_id) : "",
+    thumb: t ? `data:image/jpeg;base64,${Buffer.from(t.jpeg).toString("base64")}` : "",
+  };
 }

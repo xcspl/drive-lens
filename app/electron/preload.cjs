@@ -11,5 +11,6 @@ contextBridge.exposeInMainWorld("lens", {
     return () => ipcRenderer.removeListener("model", h);
   },
   search: (q, opts) => ipcRenderer.invoke("search", q, opts),
+  browse: (opts) => ipcRenderer.invoke("browse", opts),
   open: (url) => ipcRenderer.invoke("open", url),
 });

@@ -4,6 +4,7 @@ import type { IndexInfo, ModelState, Result } from "./lens";
 const KINDS: Array<[string, string]> = [["", "All"], ["image", "Photos"], ["video", "Videos"], ["pdf", "PDFs"], ["document", "Documents"], ["other", "Other"]];
 const EXAMPLES = ["elephant ivory seizure", "rangers training in the forest", "bear cubs in a cage", "film festival poster", "annual report"];
 const WHY_LABEL: Record<string, string> = { all: "all words", near: "words together", any: "some words" };
+const BROWSE_PAGE = 120;
 const KIND_LABEL: Record<string, string> = { image: "Photo", video: "Video", pdf: "PDF", document: "Document", other: "File" };
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [openErr, setOpenErr] = useState("");
+  const [browsed, setBrowsed] = useState<{ total: number; results: Result[] }>({ total: 0, results: [] });
   const seq = useRef(0);
   const input = useRef<HTMLInputElement>(null);
 
@@ -39,6 +41,21 @@ export default function App() {
     }, 250);
     return () => clearTimeout(t);
   }, [q, kind, info, model.state]);
+
+  // With no query: the files already looked at, folder by folder.
+  useEffect(() => {
+    if (q.trim() || !info) return;
+    let live = true;
+    window.lens.browse({ kind, offset: 0, limit: BROWSE_PAGE }).then((r) => {
+      if (live && r.ok) setBrowsed({ total: r.total || 0, results: r.results || [] });
+    });
+    return () => { live = false; };
+  }, [q === "", kind, info]);
+
+  async function more() {
+    const r = await window.lens.browse({ kind, offset: browsed.results.length, limit: BROWSE_PAGE });
+    if (r.ok) setBrowsed((b) => ({ total: r.total || 0, results: [...b.results, ...(r.results || [])] }));
+  }
 
   async function choose() {
     const r = await window.lens.chooseIndex();
@@ -91,24 +108,57 @@ export default function App() {
           </Empty>
         )}
         {info && !q.trim() && (
-          <Empty title="Find anything in the Drive by what it shows">
-            Try
-            <div className="mt-3 flex flex-wrap justify-center gap-2">
-              {EXAMPLES.map((x) => <button key={x} onClick={() => setQ(x)} className="rounded-full border border-line px-3 py-1 text-xs hover:border-accent">{x}</button>)}
+          <div>
+            <div className="mx-auto mb-5 flex max-w-3xl flex-wrap items-center justify-center gap-2 text-xs text-mute">
+              Try
+              {EXAMPLES.map((x) => <button key={x} onClick={() => setQ(x)} className="rounded-full border border-line px-3 py-1 hover:border-accent hover:text-ink">{x}</button>)}
             </div>
-            {info.lockedFolders.length > 0 && (
-              <p className="mt-6 text-xs">{info.lockedFolders.length} folders are not shared with the link and are not searched.</p>
+            <p className="mb-3 text-xs text-mute">
+              Browsing the {browsed.total.toLocaleString()} {kind ? KINDS.find(([k]) => k === kind)?.[1].toLowerCase() : "files"} looked at so far, by folder
+              {info.lockedFolders.length > 0 && <> · {info.lockedFolders.length} folders are not shared with the link and are not searched</>}
+            </p>
+            <Grid results={browsed.results} folders />
+            {browsed.results.length < browsed.total && (
+              <div className="mt-6 text-center">
+                <button onClick={more} className="rounded-md border border-line px-4 py-2 text-sm hover:bg-panel">
+                  Show more ({(browsed.total - browsed.results.length).toLocaleString()} left)
+                </button>
+              </div>
             )}
-          </Empty>
-        )}
-        {error && <p className="mx-auto max-w-3xl text-sm text-red-500">{error}</p>}
-        {results && results.length === 0 && !busy && <Empty title="Nothing found">Try other words, or fewer of them.</Empty>}
-        {results && results.length > 0 && (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
-            {results.map((r) => <Card key={r.id} r={r} />)}
           </div>
         )}
+        {error && <p className="mx-auto max-w-3xl text-sm text-red-500">{error}</p>}
+        {q.trim() && results && results.length === 0 && !busy && <Empty title="Nothing found">Try other words, or fewer of them.</Empty>}
+        {q.trim() && results && results.length > 0 && <Grid results={results} />}
       </main>
+    </div>
+  );
+}
+
+// Results in a grid; with `folders`, a heading wherever the folder changes.
+function Grid({ results, folders = false }: { results: Result[]; folders?: boolean }) {
+  const groups: Array<{ folder: string; items: Result[] }> = [];
+  for (const r of results) {
+    const last = groups[groups.length - 1];
+    if (folders && last && last.folder === r.folder) last.items.push(r);
+    else if (!folders && last) last.items.push(r);
+    else groups.push({ folder: r.folder, items: [r] });
+  }
+  return (
+    <div className="flex flex-col gap-6">
+      {groups.map((g, i) => (
+        <section key={i}>
+          {folders && (
+            <h2 className="mb-2 flex items-baseline gap-2 text-xs">
+              <span className="truncate font-medium text-ink" title={g.folder}>{g.folder || "My Drive"}</span>
+              <span className="shrink-0 text-mute">{g.items.length}</span>
+            </h2>
+          )}
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
+            {g.items.map((r) => <Card key={r.id} r={r} />)}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
