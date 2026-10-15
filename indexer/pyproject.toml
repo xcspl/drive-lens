@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drive-lens"
+version = "0.1.0"
+description = "Index a shared Google Drive folder (descriptions by a vision model, EmbeddingGemma 2 vectors, SQLite + sqlite-vec + FTS5) so any file can be found by what it shows."
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+  "image-classify @ git+https://github.com/xcspl/image-classify.git",
+  "torch>=2.8",
+  "torchvision",
+  "transformers>=5.19",
+  "sentence-transformers>=6.1",
+  "pillow>=10",
+  "pymupdf>=1.24",
+  "sqlite-vec>=0.1.9",
+  "numpy",
+]
+
+[project.scripts]
+drive-lens = "drive_lens.cli:main"
+
+[tool.setuptools]
+packages = ["drive_lens"]
