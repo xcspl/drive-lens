@@ -12,6 +12,7 @@ export default function App() {
   const [model, setModel] = useState<ModelState>({ state: "idle", progress: 0, error: "" });
   const [q, setQ] = useState("");
   const [kind, setKind] = useState("");
+  const [all, setAll] = useState(() => { try { return localStorage.getItem("showNotLookedAt") === "1"; } catch { return false; } });
   const [results, setResults] = useState<Result[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -34,28 +35,34 @@ export default function App() {
     const mine = ++seq.current;
     const t = setTimeout(async () => {
       setBusy(true);
-      const r = await window.lens.search(q, { kind, k: 60 });
+      const r = await window.lens.search(q, { kind, k: 60, all });
       if (mine !== seq.current) return;
       setBusy(false);
       if (r.ok) { setResults(r.results || []); setError(""); } else setError(r.error || "Search failed");
     }, 250);
     return () => clearTimeout(t);
-  }, [q, kind, info, model.state]);
+  }, [q, kind, all, info, model.state]);
 
   // With no query: the files already looked at, folder by folder.
   useEffect(() => {
     if (q.trim() || !info) return;
     let live = true;
-    window.lens.browse({ kind, offset: 0, limit: BROWSE_PAGE }).then((r) => {
+    window.lens.browse({ kind, offset: 0, limit: BROWSE_PAGE, all }).then((r) => {
       if (live && r.ok) setBrowsed({ total: r.total || 0, results: r.results || [] });
     });
     return () => { live = false; };
-  }, [q === "", kind, info]);
+  }, [q === "", kind, all, info]);
 
   async function more() {
-    const r = await window.lens.browse({ kind, offset: browsed.results.length, limit: BROWSE_PAGE });
+    const r = await window.lens.browse({ kind, offset: browsed.results.length, limit: BROWSE_PAGE, all });
     if (r.ok) setBrowsed((b) => ({ total: r.total || 0, results: [...b.results, ...(r.results || [])] }));
   }
+
+  function toggleAll(on: boolean) {
+    setAll(on);
+    try { localStorage.setItem("showNotLookedAt", on ? "1" : "0"); } catch { /* per-viewer convenience only */ }
+  }
+  const notLookedAt = info ? info.files - info.described : 0;
 
   async function choose() {
     const r = await window.lens.chooseIndex();
@@ -94,9 +101,16 @@ export default function App() {
           {KINDS.map(([k, label]) => (
             <button key={k} onClick={() => setKind(k)}
               className={`rounded-full border px-3 py-1 text-xs ${kind === k ? "border-accent bg-accent text-accent-ink" : "border-line text-mute hover:text-ink"}`}>
-              {label}{info && k ? <span className="ml-1 opacity-70">{(info.kinds[k] || 0).toLocaleString()}</span> : null}
+              {label}{info && k ? <span className="ml-1 opacity-70">{((all ? info.kinds : info.kindsDone ?? info.kinds)[k] || 0).toLocaleString()}</span> : null}
             </button>
           ))}
+          {notLookedAt > 0 && (
+            <label className="ml-auto flex cursor-pointer select-none items-center gap-1.5 text-xs text-mute hover:text-ink"
+              title="Files not looked at yet, or with no preview in Drive: found only by their name and folder">
+              <input type="checkbox" checked={all} onChange={(e) => toggleAll(e.target.checked)} className="accent-[var(--color-accent)]" />
+              Include files not looked at yet ({notLookedAt.toLocaleString()})
+            </label>
+          )}
         </div>
       </div>
 
@@ -114,7 +128,7 @@ export default function App() {
               {EXAMPLES.map((x) => <button key={x} onClick={() => setQ(x)} className="rounded-full border border-line px-3 py-1 hover:border-accent hover:text-ink">{x}</button>)}
             </div>
             <p className="mb-3 text-xs text-mute">
-              Browsing the {browsed.total.toLocaleString()} {kind ? KINDS.find(([k]) => k === kind)?.[1].toLowerCase() : "files"} looked at so far, by folder
+              Browsing {browsed.total.toLocaleString()} {kind ? KINDS.find(([k]) => k === kind)?.[1].toLowerCase() : "files"}{all ? "" : " looked at so far"}, by folder
               {info.lockedFolders.length > 0 && <> · {info.lockedFolders.length} folders are not shared with the link and are not searched</>}
             </p>
             <Grid results={browsed.results} folders />

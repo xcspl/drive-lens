@@ -73,13 +73,17 @@ export function info() {
     vectors: n("SELECT COUNT(*) n FROM files_vec"),
     lockedFolders: db.prepare("SELECT path FROM folders WHERE locked = 1 ORDER BY path").all().map((r) => r.path),
     kinds: Object.fromEntries(db.prepare("SELECT kind, COUNT(*) n FROM files GROUP BY kind").all().map((r) => [r.kind, r.n])),
+    kindsDone: Object.fromEntries(db.prepare("SELECT kind, COUNT(*) n FROM files WHERE status = 'done' GROUP BY kind").all().map((r) => [r.kind, r.n])),
   };
 }
 
 const fileUrl = (id) => `https://drive.google.com/file/d/${id}/view`;
 const folderUrl = (id) => `https://drive.google.com/drive/folders/${id}`;
 
-export async function search(q, { k = 60, kind = "" } = {}) {
+// By default only files already looked at ("done") are returned; `all`
+// adds the ones not looked at yet (or without a Drive preview), which only
+// their name and folder can match.
+export async function search(q, { k = 60, kind = "", all = false } = {}) {
   if (!db || !q.trim()) return [];
   const pq = parse(q);
   const scores = new Map();
@@ -111,7 +115,7 @@ export async function search(q, { k = 60, kind = "" } = {}) {
   const out = [];
   for (const rowid of ranked) {
     const f = getFile.get(rowid);
-    if (!f || (kind && f.kind !== kind)) continue;
+    if (!f || (kind && f.kind !== kind) || (!all && f.status !== "done")) continue;
     out.push({ ...toResult(f), score: +scores.get(rowid).toFixed(5), why: why.get(rowid) });
     if (out.length >= k) break;
   }
@@ -119,9 +123,9 @@ export async function search(q, { k = 60, kind = "" } = {}) {
 }
 
 /** The files already looked at, folder by folder, a page at a time (no query). */
-export function browse({ kind = "", offset = 0, limit = 60 } = {}) {
+export function browse({ kind = "", offset = 0, limit = 60, all = false } = {}) {
   if (!db) return { total: 0, results: [] };
-  const where = "status = 'done'" + (kind ? " AND kind = ?" : "");
+  const where = (all ? "1" : "status = 'done'") + (kind ? " AND kind = ?" : "");
   const args = kind ? [kind] : [];
   const total = db.prepare(`SELECT COUNT(*) n FROM files WHERE ${where}`).get(...args).n;
   const rows = db.prepare(`SELECT rowid, * FROM files WHERE ${where} ORDER BY path LIMIT ? OFFSET ?`).all(...args, limit, offset);

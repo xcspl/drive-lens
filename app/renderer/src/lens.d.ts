@@ -6,7 +6,7 @@ export type Result = {
 };
 export type IndexInfo = {
   path: string; rootId: string; listedAt: string; files: number; described: number; vectors: number;
-  lockedFolders: string[]; kinds: Record<string, number>;
+  lockedFolders: string[]; kinds: Record<string, number>; kindsDone: Record<string, number>;
 };
 export type ModelState = { state: "idle" | "loading" | "ready" | "error"; progress: number; error: string };
 
@@ -17,8 +17,8 @@ declare global {
       chooseIndex(): Promise<{ ok: boolean; info?: IndexInfo; error?: string; canceled?: boolean }>;
       modelStatus(): Promise<ModelState>;
       onModel(fn: (m: ModelState) => void): () => void;
-      search(q: string, opts?: { k?: number; kind?: string }): Promise<{ ok: boolean; results?: Result[]; error?: string }>;
-      browse(opts?: { kind?: string; offset?: number; limit?: number }): Promise<{ ok: boolean; total?: number; results?: Result[]; error?: string }>;
+      search(q: string, opts?: { k?: number; kind?: string; all?: boolean }): Promise<{ ok: boolean; results?: Result[]; error?: string }>;
+      browse(opts?: { kind?: string; offset?: number; limit?: number; all?: boolean }): Promise<{ ok: boolean; total?: number; results?: Result[]; error?: string }>;
       open(url: string): Promise<void>;
     };
   }
