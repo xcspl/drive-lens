@@ -46,8 +46,8 @@ class Embedder:
     def vectors(self, images: list, texts: list[str], batch_size: int = 8) -> np.ndarray:
         """One vector per file. images[i] alone → the picture; with texts[i] →
         picture and text together (PDFs: preview + their words); images[i]
-        None → the text alone, as a document (files Drive has no preview for:
-        their name and folder path)."""
+        None → the text alone (the model's Document prompt is added here, so
+        texts must not carry their own "title: … | text: …")."""
         out: list[np.ndarray | None] = [None] * len(images)
         plain = [i for i, (im, t) in enumerate(zip(images, texts)) if im is not None and not t]
         if plain:

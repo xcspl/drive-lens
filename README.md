@@ -12,8 +12,9 @@ the vectors ([sqlite-vec](https://github.com/asg017/sqlite-vec)).
 
 Search is hybrid: "elephant poster", "rangers training with villagers", or
 "tiger on a camera trap at night" are matched by meaning *and* by the words in
-file names, folder names and descriptions, merged with Reciprocal Rank Fusion.
-Each result links straight to the file in Drive and to its folder.
+file names, folder names and descriptions. Files with all your words come
+before files with some of them; `"exact phrase"` must appear and `-word`
+must not. Each result links straight to the file in Drive and to its folder.
 
 Nothing is downloaded and kept: previews are fetched at 1024 px, used, and
 dropped (a 256 px thumbnail stays in the index). PDFs are read once for their
@@ -22,7 +23,7 @@ text.
 ```
 drive-lens/
   indexer/      Python: list → describe → embed → index   (this README)
-  app/          desktop search app (Electron) — coming
+  app/          desktop search app (Electron): `cd app && npm install && npm run rebuild && npm start`
   .env          your settings (never committed; see .env.example)
   data/         the index, one folder per Drive root (never committed)
 ```

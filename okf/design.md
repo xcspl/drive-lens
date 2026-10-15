@@ -51,20 +51,37 @@ FTS5 and sqlite-vec vectors share rowids in one file, so the Python indexer
 and the Electron app (better-sqlite3 + sqlite-vec from npm) read the same
 thing, and handing the index out is copying one file.
 
-**Hybrid search.** Vector KNN and FTS5 bm25 (path and name weighted up —
-folder names carry much of the meaning in real libraries) merged by
-Reciprocal Rank Fusion, k=60. In the trial, vectors alone put the right file
-first 7/10 times, hybrid 10/10. Nearest vectors always exist, so a vector hit earns rank
-only above a similarity floor (`DRIVE_LENS_MIN_SIM`, 0.5). On the first 70
-files, unrelated queries scored 0.55–0.59 against the nearest picture and
-real matches mostly 0.6–0.76, but a few true matches (an ivory video) sat just
-under 0.6: a 0.6 floor lost them, 0.5 kept them (21 test queries: 18 first
-at 0.5, 17 at 0.6). What protects keyword-only matches instead is that
-**every file has a vector**: documents and files with a Drive preview are
-described and embedded like photos; files without one (zip, gpx, some videos)
-get a text vector of their name and folder path, so their meaning scores are
-comparable with everything else. Keyword search uses Porter stemming
-(arrest/arresting, rescue/rescued).
+**Hybrid search.** Several ranked lists fused with *weighted* Reciprocal
+Rank Fusion (score = Σ weight / (60 + rank), as in Elasticsearch's weighted
+RRF retriever): **meaning** (sqlite-vec, weight 1.0), **all words** (FTS5
+AND, 1.0 — the classic coordination reward for matching more of the query),
+**words together** (FTS5 NEAR within 6 words, 0.6) and **any word** (FTS5
+OR, 0.35 — progressive relaxation so a query never comes back empty because
+one word is missing). Pure OR let a file with one rare word beat a file with
+every word. A file found by several lists rises on its own. bm25 weights the
+folder path up (2×) — folder names carry much of the meaning in real
+libraries — then name, title and tags (1.5×). The search box takes `"exact
+phrase"` (must appear) and `-word` (must not), applied to every list,
+meaning included. Keyword search uses Porter stemming (arrest/arresting). On
+21 natural test queries over the first 70 files: 19 first with this method,
+18 with plain RRF over OR, 12 meaning alone. The app (`app/electron/search.js`)
+implements the same rules and returns identical rankings (checked on 8
+queries).
+
+**Similarity floor.** Nearest vectors always exist, so a vector hit earns rank
+only above a floor (`DRIVE_LENS_MIN_SIM`, 0.5). On the first 70 files,
+unrelated queries scored 0.55–0.59 against the nearest picture and real
+matches mostly 0.6–0.76, but a few true matches (an ivory video) sat just
+under 0.6: a 0.6 floor lost them, 0.5 kept them. Files with no Drive preview
+(zip, gpx, some videos) get **no** vector: a text vector of their name
+outscored real pictures (text-to-text similarity runs higher than
+text-to-image), and their name and folder are in the keyword index anyway.
+
+**The app's query model.** The app embeds queries with the ONNX build of the
+same model, text part only, 8-bit (~314 MB, downloaded once). The exported
+graph also takes image/video/audio feature inputs; a query passes empty
+`[0, 512]` tensors. Against the indexer's PyTorch float32 query vectors:
+cosine 1.0000 and the same top 5 for 12 of 12 queries.
 
 **Resumable, incremental, accountable.** Status per file (listed → done |
 skipped | error, three attempts), one transaction per batch, Ctrl-C safe.

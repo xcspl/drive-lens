@@ -101,14 +101,17 @@ def process(conn, source: AnonymousSource, embedder: Embedder, describer: Descri
             chunk = rows[start:start + batch]
             outs = list(pool.map(lambda r: _work(r, source, describer), chunk))
             ready = [o for o in outs if o.prepared and not o.error]
+            # Files with no preview get no vector: a text vector of their name
+            # outscored real pictures (text-text similarity runs higher than
+            # text-image), and their name and folder are in the keyword index.
+            visual = [o for o in ready if o.prepared.image is not None]
             vectors = []
-            if ready:
+            if visual:
                 te = time.time()
-                texts = [o.prepared.text if o.row["kind"] == "pdf" else
-                         f"title: {o.row['name']} | text: {o.row['path']}" if o.prepared.image is None else "" for o in ready]
-                vectors = embedder.vectors([o.prepared.image for o in ready], texts)
+                texts = [o.prepared.text if o.row["kind"] == "pdf" else "" for o in visual]
+                vectors = embedder.vectors([o.prepared.image for o in visual], texts)
                 embed_secs += time.time() - te
-            vec_of = {id(o): v for o, v in zip(ready, vectors)}
+            vec_of = {id(o): v for o, v in zip(visual, vectors)}
             for o in outs:
                 rid = o.row["rowid"]
                 for i, u in enumerate(o.usage or []):
@@ -120,7 +123,7 @@ def process(conn, source: AnonymousSource, embedder: Embedder, describer: Descri
                     failed += not o.skipped
                     log(f"  ✗ {o.row['path'][-90:]}  {o.error[:160]}")
                     continue
-                store.save_done(conn, rid, analysis=o.analysis, vector=vec_of[id(o)], thumb=o.prepared.thumb,
+                store.save_done(conn, rid, analysis=o.analysis, vector=vec_of.get(id(o)), thumb=o.prepared.thumb,
                                 described_by=describer.label if describer else "", embedded_by=embedder.label)
                 done += 1
                 tok = sum((u.get("total_tokens") or 0) for u in o.usage or [])

@@ -170,6 +170,33 @@ class StoreSearchTests(unittest.TestCase):
         self.assertEqual(fts_query("FFF 2025"), '"fff" OR "2025"*')
         self.assertEqual(fts_query("the of a"), "")
 
+    def test_parse_and_lists(self):
+        from drive_lens.search import fts_queries, parse
+        q = parse('thai rangers "camera trap" -poster')
+        self.assertEqual((q.words, q.phrases, q.exclude), (["thai", "rangers"], ["camera trap"], ["poster"]))
+        f = fts_queries(q)
+        self.assertEqual(f["all"], '"camera trap" AND ("thai"* AND "rangers"*) NOT "poster"*')
+        self.assertEqual(f["any"], '"camera trap" AND ("thai"* OR "rangers"*) NOT "poster"*')
+        self.assertIn("NEAR(", f["near"])
+        self.assertEqual(fts_queries(parse("gorilla")), {"all": '("gorilla"*)'})
+        self.assertEqual(fts_queries(parse('"camera trap"')), {"all": '"camera trap"'})
+
+    def test_all_words_outrank_one_word(self):
+        self.add("t1", "Thai Rangers/Training day/IMG_1.jpg")
+        self.add("t2", "Training/other/IMG_2.jpg")
+        self.add("t3", "Thai food/IMG_3.jpg")
+        self.conn.commit()
+        res = search(self.conn, "thai rangers training", embedder=None, k=3)
+        self.assertEqual(res[0]["id"], "t1")
+
+    def test_phrase_and_exclusion(self):
+        self.add("p1", "Camera Trap footage/a.jpg")
+        self.add("p2", "Camera stuff/Trap/b.jpg")
+        self.add("p3", "Camera Trap footage/poster.png")
+        self.conn.commit()
+        ids = [r["id"] for r in search(self.conn, '"camera trap" -poster', embedder=None, k=5)]
+        self.assertEqual(ids, ["p1"])
+
 
 class DescribeTests(unittest.TestCase):
     def test_quota_detection(self):

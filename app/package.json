@@ -1,0 +1,38 @@
+{
+  "name": "drive-lens-app",
+  "productName": "Drive Lens",
+  "version": "0.1.0",
+  "description": "Search a drive-lens index: find any file in a shared Google Drive by what it shows.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "build": "vite build",
+    "start": "vite build && node scripts/start.mjs",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "parity": "node scripts/run-as-node.mjs scripts/parity.mjs",
+    "typecheck": "tsc --noEmit -p .",
+    "app": "node scripts/start.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.3.0",
+    "better-sqlite3": "13.0.3",
+    "sqlite-vec": "0.1.9"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "4.2.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "24.19.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "electron": "43.7.7",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.1"
+  }
+}
