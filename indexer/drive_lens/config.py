@@ -70,6 +70,10 @@ def load(env_file: str | None = None, share_link: str | None = None) -> Settings
     link = share_link or env.get("DRIVE_LENS_SHARE_LINK", "")
     if not link:
         raise SystemExit("No Drive folder: set DRIVE_LENS_SHARE_LINK in .env (see .env.example)")
+    # Embedder settings are read by embed.py from the environment; let .env set them.
+    for k in ("DRIVE_LENS_DTYPE", "DRIVE_LENS_DEVICE", "DRIVE_LENS_MIN_SIM", "DRIVE_LENS_EMBED_MODEL"):
+        if env.get(k):
+            os.environ.setdefault(k, env[k])
     base = path.parent if path else Path.cwd()
     data = Path(env.get("DRIVE_LENS_DATA") or base / "data").expanduser()
     return Settings(
