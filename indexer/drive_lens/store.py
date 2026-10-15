@@ -43,7 +43,7 @@ CREATE INDEX IF NOT EXISTS files_status ON files (status, kind);
 CREATE TABLE IF NOT EXISTS thumbs (rowid INTEGER PRIMARY KEY, jpeg BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS usage (
   id INTEGER PRIMARY KEY, file_rowid INTEGER, model TEXT, effort TEXT,
-  prompt_tokens INTEGER, completion_tokens INTEGER, reasoning_tokens INTEGER,
+  prompt_tokens INTEGER, completion_tokens INTEGER, reasoning_tokens INTEGER, cached_tokens INTEGER,
   seconds REAL, ok INTEGER, error TEXT, at TEXT
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
@@ -70,6 +70,8 @@ def connect(path: Path, *, readonly: bool = False) -> sqlite3.Connection:
     if not readonly:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
+        if "cached_tokens" not in {r[1] for r in conn.execute("PRAGMA table_info(usage)")}:  # added 2026-10-16
+            conn.execute("ALTER TABLE usage ADD COLUMN cached_tokens INTEGER")
         conn.execute("INSERT OR IGNORE INTO meta VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
         conn.commit()
     return conn
@@ -169,8 +171,10 @@ def save_failure(conn: sqlite3.Connection, rowid: int, error: str, *, skipped: b
 
 def log_usage(conn: sqlite3.Connection, rowid: int, model: str, effort: str, usage: dict, seconds: float, ok: bool, error: str = "") -> None:
     details = usage.get("completion_tokens_details") or {}
-    conn.execute("INSERT INTO usage (file_rowid, model, effort, prompt_tokens, completion_tokens, reasoning_tokens, seconds, ok, error, at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                 (rowid, model, effort, usage.get("prompt_tokens"), usage.get("completion_tokens"), details.get("reasoning_tokens"),
+    cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+    conn.execute("INSERT INTO usage (file_rowid, model, effort, prompt_tokens, completion_tokens, reasoning_tokens, cached_tokens, seconds, ok, error, at) "
+                 "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                 (rowid, model, effort, usage.get("prompt_tokens"), usage.get("completion_tokens"), details.get("reasoning_tokens"), cached,
                   round(seconds, 2), 1 if ok else 0, error[:300] or None, now()))
 
 
@@ -188,7 +192,7 @@ def todo(conn: sqlite3.Connection, *, kinds: list[str], limit: int | None, retry
 def stats(conn: sqlite3.Connection) -> dict:
     by = {f"{r['kind']}:{r['status']}": r["n"] for r in conn.execute("SELECT kind, status, COUNT(*) n FROM files GROUP BY kind, status")}
     u = conn.execute("SELECT COUNT(*) calls, SUM(ok) ok, SUM(prompt_tokens) pin, SUM(completion_tokens) pout, SUM(reasoning_tokens) preason, "
-                     "AVG(seconds) secs FROM usage").fetchone()
+                     "SUM(cached_tokens) pcached, AVG(NULLIF(seconds, 0)) secs FROM usage").fetchone()
     return {
         "files": conn.execute("SELECT COUNT(*) FROM files").fetchone()[0],
         "folders": conn.execute("SELECT COUNT(*) FROM folders WHERE locked = 0").fetchone()[0],

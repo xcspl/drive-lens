@@ -120,7 +120,7 @@ function Card({ r }: { r: Result }) {
       <button onClick={() => window.lens.open(r.url)} className="relative aspect-[4/3] w-full overflow-hidden bg-bg" title="Open in Google Drive">
         {r.thumb
           ? <img src={r.thumb} alt={r.title || r.name} className="size-full object-cover transition group-hover:scale-[1.02]" />
-          : <div className="flex size-full items-center justify-center text-xs uppercase tracking-wider text-mute">{KIND_LABEL[r.kind] || "File"}</div>}
+          : <FileTile name={r.name} kind={r.kind} />}
         <span className="absolute left-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white">{KIND_LABEL[r.kind] || r.kind}</span>
         {r.sensitive && <span className="absolute right-2 top-2 rounded bg-amber-500/90 px-1.5 py-0.5 text-[10px] font-medium text-black">sensitive</span>}
       </button>
@@ -138,6 +138,50 @@ function Card({ r }: { r: Result }) {
         </div>
       </div>
     </article>
+  );
+}
+
+// Placeholder art for files with no Drive preview: a tile per file type.
+type TileType = { label: string; color: string; icon: React.ReactNode };
+const ICON = {
+  sheet: <><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M4 9h16M4 15h16M10 3v18" /></>,
+  doc: <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4M9 12h6M9 15h6M9 18h4" /></>,
+  slides: <><rect x="3" y="4" width="18" height="12" rx="1.5" /><path d="M12 16v4M8 20h8M7 12l3-3 2 2 4-4" /></>,
+  pdf: <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" /><path d="M8.5 16.5c2-4 3.5-7 3.5-8.5s-1.5-1-1.5 0 2 5 5 6.5-6 .5-7 2z" /></>,
+  video: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M10 9v6l5-3z" /></>,
+  audio: <><path d="M4 12h2M8 8v8M12 5v14M16 9v6M20 11v2" /></>,
+  archive: <><path d="M4 7h16v13H4zM3 4h18v3H3zM10 11h4" /></>,
+  map: <><path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z" /><circle cx="12" cy="10" r="2.2" /></>,
+  design: <><path d="M4 20l4-1 11-11-3-3L5 16z" /><path d="M14 7l3 3" /></>,
+  image: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></>,
+  file: <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" /></>,
+};
+const TYPES: Array<[RegExp, TileType]> = [
+  [/^(xlsx?|csv|ods|numbers|tsv)$/, { label: "Spreadsheet", color: "#1e8e4e", icon: ICON.sheet }],
+  [/^(docx?|odt|rtf|txt|pages|md)$/, { label: "Document", color: "#2b6cd4", icon: ICON.doc }],
+  [/^(pptx?|key|odp)$/, { label: "Slides", color: "#d9662b", icon: ICON.slides }],
+  [/^pdf$/, { label: "PDF", color: "#c93a3a", icon: ICON.pdf }],
+  [/^(mp4|mov|m4v|avi|wmv|mpe?g|mkv|webm|mts|3gp|flv|vob|m2ts)$/, { label: "Video", color: "#7b4fd6", icon: ICON.video }],
+  [/^(mp3|wav|m4a|aac|ogg|flac|opus)$/, { label: "Audio", color: "#138a8a", icon: ICON.audio }],
+  [/^(zip|rar|7z|tar|gz|tgz|bz2)$/, { label: "Archive", color: "#b7791f", icon: ICON.archive }],
+  [/^(gpx|kml|kmz|geojson|shp)$/, { label: "Map / GPS", color: "#2f855a", icon: ICON.map }],
+  [/^(ai|psd|indd|eps|svg|sketch|fig|xd|cdr)$/, { label: "Design file", color: "#c2417a", icon: ICON.design }],
+  [/^(jpe?g|png|heic|heif|webp|gif|tiff?|nef|cr2|arw|dng|bmp)$/, { label: "Image", color: "#5a6b7d", icon: ICON.image }],
+];
+const KIND_TILE: Record<string, TileType> = {
+  document: { label: "Google file", color: "#2b6cd4", icon: ICON.doc },
+  video: TYPES[4][1], image: TYPES[9][1], pdf: TYPES[3][1],
+};
+
+function FileTile({ name, kind }: { name: string; kind: string }) {
+  const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
+  const t = TYPES.find(([re]) => re.test(ext))?.[1] ?? KIND_TILE[kind] ?? { label: "File", color: "#6b7268", icon: ICON.file };
+  return (
+    <div className="flex size-full flex-col items-center justify-center gap-2" style={{ background: `linear-gradient(135deg, ${t.color}26, ${t.color}0d)` }}>
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke={t.color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{t.icon}</svg>
+      <span className="rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-white" style={{ background: t.color }}>{ext && ext.length <= 5 ? ext : t.label}</span>
+      <span className="text-[11px] text-mute">{t.label} · no preview</span>
+    </div>
   );
 }
 

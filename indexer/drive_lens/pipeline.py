@@ -96,10 +96,15 @@ def process(conn, source: AnonymousSource, embedder: Embedder, describer: Descri
     done = failed = skipped = 0
     t0 = time.time()
     embed_secs = 0.0
+    chunks = [rows[i:i + batch] for i in range(0, total, batch)]
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        for start in range(0, total, batch):
-            chunk = rows[start:start + batch]
-            outs = list(pool.map(lambda r: _work(r, source, describer), chunk))
+        submit = lambda chunk: [pool.submit(_work, r, source, describer) for r in chunk]
+        pending = submit(chunks[0]) if chunks else []
+        for ci, chunk in enumerate(chunks):
+            outs = [f.result() for f in pending]
+            # The next batch's previews and descriptions run while this one embeds.
+            pending = submit(chunks[ci + 1]) if ci + 1 < len(chunks) else []
+            start = ci * batch
             ready = [o for o in outs if o.prepared and not o.error]
             # Files with no preview get no vector: a text vector of their name
             # outscored real pictures (text-text similarity runs higher than

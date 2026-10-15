@@ -59,7 +59,7 @@ def usage_summary(st: dict) -> dict:
     left = sum(v for k, v in st["by_kind_status"].items() if k.split(":")[0] in KINDS and k.endswith((":listed", ":error")))
     per = (pin + pout) / max(1, done)
     return {"calls": calls, "failed_calls": calls - ok, "input_tokens": pin, "output_tokens": pout,
-            "reasoning_tokens": u.get("preason") or 0, "avg_seconds_per_call": round(u.get("secs") or 0, 1),
+            "reasoning_tokens": u.get("preason") or 0, "cached_input_tokens": u.get("pcached") or 0, "avg_seconds_per_call": round(u.get("secs") or 0, 1),
             "tokens_per_described_file": round(per), "files_left": left,
             "estimated_tokens_for_the_rest": round(per * left), "estimated_calls_for_the_rest": round(calls / max(1, done) * left)}
 

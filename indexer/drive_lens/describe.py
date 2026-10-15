@@ -22,6 +22,18 @@ from image_classify import model as ic
 CATEGORIES = ic.DEFAULT_CATEGORIES
 
 
+def _instructions() -> str:
+    """image-classify's prompt without its per-file part: identical on every
+    call, so it can lead the request and be served from the provider's cache."""
+    marker = "File context (use it as a hint, trust the pixels):\n\n\n"
+    text = ic.image_prompt(CATEGORIES, {})
+    assert marker in text, "image-classify's prompt changed: update describe._instructions"
+    return text.replace(marker, "The file's name and folder follow the image: use them as hints, trust the pixels.\n\n")
+
+
+INSTRUCTIONS = _instructions()
+
+
 class DescribeError(Exception):
     def __init__(self, message: str, usage: list[dict] | None = None, status: int = 0):
         super().__init__(message)
@@ -111,10 +123,16 @@ class Describer:
         """Analyse one image. Returns (clean analysis, usage of every call made).
         A reply without a JSON object (often cut off by thinking) is retried once."""
         b64 = base64.b64encode(jpeg).decode()
-        messages = [{"role": "user", "content": [
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-            {"type": "text", "text": ic.image_prompt(CATEGORIES, context)},
-        ]}]
+        hints = "\n".join(f"- {k}: {v}" for k, v in context.items() if v)
+        # Fixed instructions first (the same bytes on every call, so the
+        # provider can cache them), then the image, then this file's details.
+        messages = [
+            {"role": "system", "content": INSTRUCTIONS},
+            {"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                {"type": "text", "text": f"File context (a hint; trust the pixels):\n{hints}" if hints else "Catalog this image."},
+            ]},
+        ]
         usages: list[dict] = []
         reason = ""
         for _ in range(2):
