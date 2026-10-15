@@ -83,6 +83,16 @@ graph also takes image/video/audio feature inputs; a query passes empty
 `[0, 512]` tensors. Against the indexer's PyTorch float32 query vectors:
 cosine 1.0000 and the same top 5 for 12 of 12 queries.
 
+**Every run is a sync.** `run` lists the Drive first, then processes only
+files not done. A listing compares by Drive file id: new → added, same id with
+a new path or name → updated in place (no new model call), not seen → removed.
+Removal is the dangerous step, so two guards: a folder that was readable and
+answers 401/403/404 now keeps its files (sharing may come back; Google also
+refuses briefly), and a listing that would remove over 20% of the index (min.
+50 files) removes nothing until `--allow-mass-removal`. Each listing has a
+microsecond stamp; "seen" means equal to it, so two listings in one second
+cannot blur together (a second-resolution stamp did, found by the tests).
+
 **Resumable, incremental, accountable.** Status per file (listed → done |
 skipped | error, three attempts), one transaction per batch, Ctrl-C safe.
 Re-listing marks new, moved, changed (by checksum or size, API-key source)

@@ -1,7 +1,7 @@
 """drive-lens: index a shared Google Drive folder so any file can be found by what it shows.
 
   drive-lens list                 walk the share link, record every folder and file
-  drive-lens run [--limit N]      describe + embed what's new (resumable)
+  drive-lens run [--limit N]      sync with the Drive, then describe + embed what's new (resumable)
   drive-lens status               counts, locked folders, token use so far
   drive-lens search "words"       hybrid search from the terminal
   drive-lens export out.db        a compact copy of the index to share
@@ -26,7 +26,7 @@ def cmd_list(s: config.Settings, a) -> int:
     conn = store.connect(s.db_path)
     src = source_for(s.google_api_key)
     print(f"Listing {s.share_link} ({src.name}) into {s.db_path}", file=sys.stderr)
-    r = list_drive(src, conn, s.root_id, pause=a.pause)
+    r = list_drive(src, conn, s.root_id, pause=a.pause, allow_mass_removal=a.allow_mass_removal)
     print(json.dumps(r, indent=1))
     return 0
 
@@ -36,15 +36,22 @@ def cmd_run(s: config.Settings, a) -> int:
     from .embed import Embedder
     from .pipeline import process
     conn = store.connect(s.db_path)
+    if not a.no_list:
+        # Sync with the Drive first: new files in, moves and renames applied, removed files out.
+        from .pipeline import list_drive
+        print(f"Syncing with {s.share_link} …", file=sys.stderr)
+        sync = list_drive(source_for(s.google_api_key), conn, s.root_id, pause=a.pause)
+        print("sync: " + json.dumps(sync), file=sys.stderr)
     if not conn.execute("SELECT 1 FROM files LIMIT 1").fetchone():
-        raise SystemExit("The index is empty: run `drive-lens list` first.")
+        raise SystemExit("The index is empty: nothing was found at the share link.")
     describer = None
     if not a.no_describe:
         if not s.model_key:
             raise SystemExit("MINIMAX_API_KEY is empty in .env (or pass --no-describe)")
         describer = Describer(base_url=s.base_url, api_key=s.model_key, model=s.model, effort=a.effort or s.effort)
     r = process(conn, source_for(s.google_api_key), Embedder(a.device), describer, kinds=a.kinds.split(","),
-                limit=a.limit, sample=a.sample, batch=a.batch, concurrency=a.concurrency, retry_errors=a.retry_errors)
+                limit=a.limit, sample=a.sample, batch=a.batch, concurrency=a.concurrency, retry_errors=a.retry_errors,
+                retry_skipped=a.retry_skipped)
     print(json.dumps(r, indent=1))
     return 0
 
@@ -119,6 +126,8 @@ def main(argv: list[str] | None = None) -> int:
 
     sp = sub.add_parser("list", help="walk the share link and record every folder and file")
     sp.add_argument("--pause", type=float, default=0.3, help="seconds between folder requests (default 0.3)")
+    sp.add_argument("--allow-mass-removal", action="store_true",
+                    help="remove files not seen even when that is more than 20%% of the index (normally refused)")
     sp.set_defaults(fn=cmd_list)
 
     sp = sub.add_parser("run", help="describe and embed files not done yet")
@@ -131,6 +140,9 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--device", help="cpu|mps|cuda (default: best available)")
     sp.add_argument("--no-describe", action="store_true", help="vectors only, no model calls")
     sp.add_argument("--retry-errors", action="store_true", help="also retry files that failed before (up to 3 attempts)")
+    sp.add_argument("--retry-skipped", action="store_true", help="also retry files skipped before (e.g. no Drive preview)")
+    sp.add_argument("--no-list", action="store_true", help="skip the sync with the Drive (by default every run lists it first)")
+    sp.add_argument("--pause", type=float, default=0.3, help="seconds between folder requests while syncing (default 0.3)")
     sp.set_defaults(fn=cmd_run)
 
     sp = sub.add_parser("status", help="counts, locked folders, token use")

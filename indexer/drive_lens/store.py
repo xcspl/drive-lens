@@ -136,15 +136,43 @@ def upsert_file(conn: sqlite3.Connection, *, id: str, name: str, mime: str, kind
     return "changed" if content_changed else "moved" if moved else "same"
 
 
-def remove_unseen(conn: sqlite3.Connection, stamp: str) -> int:
-    """After a complete walk: forget files no longer in the shared tree."""
-    gone = [r[0] for r in conn.execute("SELECT rowid FROM files WHERE seen_at IS NOT ? ", (stamp,))]
+# A sync never removes more than this share of the index (or MASS_REMOVAL_MIN
+# files, whichever is larger) in one go: a broken listing must not wipe it.
+MASS_REMOVAL_SHARE = 0.2
+MASS_REMOVAL_MIN = 50
+
+
+def keep_under(conn: sqlite3.Connection, folder_path: str, stamp: str) -> int:
+    """Mark files and folders under `folder_path` as seen: a folder that was
+    readable before and is locked now (sharing changed, or Google refused for
+    a moment) keeps its files and their descriptions."""
+    if not folder_path:
+        return 0
+    like = folder_path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "/%"
+    n = conn.execute("UPDATE files SET seen_at = ? WHERE path LIKE ? ESCAPE '\\'", (stamp, like)).rowcount
+    conn.execute("UPDATE folders SET seen_at = ? WHERE path LIKE ? ESCAPE '\\'", (stamp, like))
+    return n
+
+
+def unseen(conn: sqlite3.Connection, stamp: str) -> list[int]:
+    return [r[0] for r in conn.execute("SELECT rowid FROM files WHERE seen_at IS NOT ?", (stamp,))]
+
+
+def remove_unseen(conn: sqlite3.Connection, stamp: str, *, force: bool = False) -> tuple[int, str]:
+    """After a complete walk: forget files and folders no longer in the shared
+    tree. Returns (removed, note); refuses a mass removal unless forced."""
+    gone = unseen(conn, stamp)
+    total = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+    limit = max(MASS_REMOVAL_MIN, int(total * MASS_REMOVAL_SHARE))
+    if len(gone) > limit and not force:
+        return 0, (f"{len(gone)} of {total} files were not seen in this listing — more than the {limit} a sync may "
+                   f"remove at once, so nothing was removed. If they really left the Drive, run `drive-lens list --allow-mass-removal`.")
     for rid in gone:
         for t in ("files_fts", "files_vec", "thumbs"):
             conn.execute(f"DELETE FROM {t} WHERE rowid = ?", (rid,))
         conn.execute("DELETE FROM files WHERE rowid = ?", (rid,))
     conn.execute("DELETE FROM folders WHERE seen_at IS NOT ?", (stamp,))
-    return len(gone)
+    return len(gone), ""
 
 
 def save_done(conn: sqlite3.Connection, rowid: int, *, analysis: dict | None, vector, thumb: bytes | None,
@@ -178,12 +206,14 @@ def log_usage(conn: sqlite3.Connection, rowid: int, model: str, effort: str, usa
                   round(seconds, 2), 1 if ok else 0, error[:300] or None, now()))
 
 
-def todo(conn: sqlite3.Connection, *, kinds: list[str], limit: int | None, retry_errors: bool, sample: int | None = None) -> list[sqlite3.Row]:
+def todo(conn: sqlite3.Connection, *, kinds: list[str], limit: int | None, retry_errors: bool, sample: int | None = None,
+         retry_skipped: bool = False) -> list[sqlite3.Row]:
     """Files still to process. `sample` picks a fixed pseudo-random spread
-    across the tree instead of listing order."""
-    statuses = ("listed", "error") if retry_errors else ("listed",)
+    across the tree instead of listing order. Skipped files (no preview) come
+    back only with `retry_skipped`, after a fallback was added for them."""
+    statuses = ("listed",) + (("error",) if retry_errors else ()) + (("skipped",) if retry_skipped else ())
     q = (f"SELECT rowid, * FROM files WHERE status IN ({','.join('?' * len(statuses))}) AND kind IN ({','.join('?' * len(kinds))}) "
-         f"AND attempts < 3 ORDER BY {'(rowid * 2654435761) % 4294967296' if sample else 'rowid'}")
+         f"AND (attempts < 3 OR status = 'skipped') ORDER BY {'(rowid * 2654435761) % 4294967296' if sample else 'rowid'}")
     rows = conn.execute(q, (*statuses, *kinds)).fetchall()
     n = sample or limit
     return rows[:n] if n else rows

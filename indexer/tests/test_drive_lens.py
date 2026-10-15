@@ -152,8 +152,33 @@ class StoreSearchTests(unittest.TestCase):
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM files_vec").fetchone()[0], 0)
         self.add("b", "x/b.jpg", stamp="s2")
         self.add("c", "x/c.jpg", stamp="s1")
-        self.assertEqual(store.remove_unseen(self.conn, "s2"), 1)
+        self.assertEqual(store.remove_unseen(self.conn, "s2"), (1, ""))
         self.assertEqual(sorted(r[0] for r in self.conn.execute("SELECT id FROM files")), ["a", "b"])
+
+    def test_sync_keeps_files_of_a_newly_locked_folder(self):
+        from drive_lens.pipeline import list_drive
+        tree = {
+            "ROOTxxxxxxxx": entry("SUBxxxxxxxxx", "Tiger", folder=True) + entry("F1xxxxxxxxxx", "a.jpg"),
+            "SUBxxxxxxxxx": entry("F2xxxxxxxxxx", "b.jpg") + entry("F3xxxxxxxxxx", "c.jpg"),
+        }
+        list_drive(FakeSource(tree), self.conn, "ROOTxxxxxxxx", pause=0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0], 3)
+        # Next sync: Tiger answers 401, a.jpg was deleted from Drive.
+        tree["ROOTxxxxxxxx"] = entry("SUBxxxxxxxxx", "Tiger", folder=True)
+        r = list_drive(FakeSource(tree, locked={"SUBxxxxxxxxx"}), self.conn, "ROOTxxxxxxxx", pause=0)
+        self.assertEqual((r["removed"], r["kept_under_locked"]), (1, 2))
+        self.assertEqual(sorted(x[0] for x in self.conn.execute("SELECT name FROM files")), ["b.jpg", "c.jpg"])
+
+    def test_sync_refuses_a_mass_removal(self):
+        from drive_lens.pipeline import list_drive
+        many = "".join(entry(f"F{i:011d}", f"{i}.jpg") for i in range(60))
+        list_drive(FakeSource({"ROOTxxxxxxxx": many}), self.conn, "ROOTxxxxxxxx", pause=0)
+        r = list_drive(FakeSource({"ROOTxxxxxxxx": entry("F00000000000", "0.jpg")}), self.conn, "ROOTxxxxxxxx", pause=0)
+        self.assertEqual(r["removed"], 0)
+        self.assertIn("nothing was removed", r["note"])
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM files").fetchone()[0], 60)
+        r = list_drive(FakeSource({"ROOTxxxxxxxx": entry("F00000000000", "0.jpg")}), self.conn, "ROOTxxxxxxxx", pause=0, allow_mass_removal=True)
+        self.assertEqual(r["removed"], 59)
 
     def test_todo_and_failures(self):
         for i in range(10):
@@ -164,6 +189,9 @@ class StoreSearchTests(unittest.TestCase):
         store.save_failure(self.conn, self.rowid("f0"), "boom")
         self.assertEqual(len(store.todo(self.conn, kinds=["image"], limit=None, retry_errors=False)), 9)
         self.assertEqual(len(store.todo(self.conn, kinds=["image"], limit=None, retry_errors=True)), 10)
+        store.save_failure(self.conn, self.rowid("f1"), "no preview: HTTP 404", skipped=True)
+        self.assertNotIn("f1", [r["id"] for r in store.todo(self.conn, kinds=["image"], limit=None, retry_errors=True)])
+        self.assertIn("f1", [r["id"] for r in store.todo(self.conn, kinds=["image"], limit=None, retry_errors=False, retry_skipped=True)])
 
     def test_fts_query(self):
         self.assertEqual(fts_query("photo of a gorilla"), '"gorilla"*')

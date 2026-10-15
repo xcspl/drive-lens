@@ -67,8 +67,18 @@ cache. It uses Apple's GPU (MPS) or an NVIDIA GPU when there is one.
 .venv/bin/drive-lens export ~/freeland-index.db   # a compact copy to hand out
 ```
 
-Run `list` again later to pick up new, moved and deleted files; `run` then
-processes only what is new or changed.
+Every `run` first syncs the index with the Drive (a fresh listing; skip it
+with `--no-list`): new files are added, moved and renamed files get their new
+path without being described again, and files gone from the Drive are
+removed. Then only new files are processed — nothing already done is sent to
+the model again. Two guards keep a bad listing from destroying work: files in
+a folder that was readable and is now locked are kept, and a sync that would
+remove more than 20% of the index (or 50 files) removes nothing until you run
+`drive-lens list --allow-mass-removal`. Files skipped for lack of a Drive
+preview are retried with `run --retry-skipped`.
+
+Without a Google API key, a file edited in place (same Drive file, new
+content) is not noticed; with `GOOGLE_API_KEY` set, its checksum is.
 
 **Locked folders.** Folders not shared with the link are listed by
 `status` and skipped. Their owner can switch them to "anyone with the link".

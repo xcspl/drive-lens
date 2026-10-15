@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 import time
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -23,8 +24,9 @@ def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-def list_drive(source: AnonymousSource, conn, root_id: str, *, pause: float = 0.3) -> dict:
-    stamp = store.now()
+def list_drive(source: AnonymousSource, conn, root_id: str, *, pause: float = 0.3, allow_mass_removal: bool = False) -> dict:
+    # Unique per listing (microseconds): "seen in this listing" is equality with it.
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     report = WalkReport()
     counts = {"new": 0, "changed": 0, "moved": 0, "same": 0}
     t0 = time.time()
@@ -39,13 +41,21 @@ def list_drive(source: AnonymousSource, conn, root_id: str, *, pause: float = 0.
         e = item.entry
         counts[store.upsert_file(conn, id=e.id, name=e.name, mime=e.mime, kind=kind_of(e.mime, e.name), size=e.size, md5=e.md5,
                                  modified=e.modified, path=item.path, parent_id=item.parent_id, stamp=stamp)] += 1
+    kept = 0
     for fid, path, reason in report.locked:
+        was_readable = conn.execute("SELECT 1 FROM folders WHERE id = ? AND locked = 0", (fid,)).fetchone()
         store.upsert_folder(conn, fid, path, None, stamp, locked=reason)
-    removed = store.remove_unseen(conn, stamp)
+        if was_readable:
+            n = store.keep_under(conn, path, stamp)
+            kept += n
+            log(f"  ! {path or fid} was readable before and is locked now ({reason}); kept its {n} files")
+    removed, note = store.remove_unseen(conn, stamp, force=allow_mass_removal)
+    if note:
+        log(f"  ! {note}")
     store.set_meta(conn, root_id=root_id, listed_at=stamp, source=source.name)
     conn.commit()
-    return {"folders": report.folders, "files": report.files, "locked": len(report.locked), "removed": removed, **counts,
-            "seconds": round(time.time() - t0)}
+    return {"folders": report.folders, "files": report.files, "locked": len(report.locked), "removed": removed,
+            "kept_under_locked": kept, **counts, "seconds": round(time.time() - t0), **({"note": note} if note else {})}
 
 
 @dataclass
@@ -88,8 +98,8 @@ def _work(row, source: AnonymousSource, describer: Describer | None) -> Outcome:
 
 def process(conn, source: AnonymousSource, embedder: Embedder, describer: Describer | None, *, kinds: list[str],
             limit: int | None = None, sample: int | None = None, batch: int = 16, concurrency: int = 4,
-            retry_errors: bool = False) -> dict:
-    rows = store.todo(conn, kinds=kinds, limit=limit, retry_errors=retry_errors, sample=sample)
+            retry_errors: bool = False, retry_skipped: bool = False) -> dict:
+    rows = store.todo(conn, kinds=kinds, limit=limit, retry_errors=retry_errors, sample=sample, retry_skipped=retry_skipped)
     total = len(rows)
     log(f"{total} files to process ({', '.join(kinds)}); describer: {describer.label if describer else 'off'}; embedder: {embedder.label}")
     store.set_meta(conn, embed_model=embedder.label, describe_model=describer.label if describer else "", dims=store.DIMS)
