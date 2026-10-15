@@ -16,3 +16,4 @@ handling:
 # Note
 
 * [Todo: five frames per video](video-frames.md) - Planned, not built. Describe and embed each video from five equidistant frames instead of Drive's single preview frame, store one vector per frame, and let the app slide through the frames on a video's card.
+* [Todo: find photos by a face](face-search.md) - Planned, not built. Detect the faces in every photo and video frame, keep a face vector per face (no names), and let the app take any pasted face and list the files with the closest faces. Covers models, storage, the app side, resolution limits, and the privacy rules it needs.
