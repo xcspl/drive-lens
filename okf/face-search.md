@@ -44,9 +44,29 @@ nearest face vectors come back as files, each with its matching face crop
 marked and a similarity. A threshold, set on a test set, separates "likely
 the same person" from "looks similar".
 
-**Limits.** Previews are 1024 px, so faces in group shots and crowd photos
-may be too small to match well; originals would help but cost downloads.
-Side profiles, sunglasses, masks and low light match poorly with any model.
+**Higher-resolution images for photos with faces.** At the 1024 px preview,
+faces in group shots and crowds are a few dozen pixels wide, too small to
+match well (face embedders want ~112 px or more per face). Drive's preview
+endpoint serves larger sizes with no key and no download of the original:
+`thumbnail?id=…&sz=w4096` gave a 4096×3072 JPEG (2.6 MB, against 146 KB at
+w1024) for a camera photo, tested 2026-10-16. (`sz=w8000` returned
+8000×6000, more than the camera's pixels, so Drive upscales: cap at w4096
+or the original's size.) So, two steps:
+
+1. Detect faces on the 1024 px preview (cheap).
+2. Only for photos with a face smaller than ~112 px there, fetch w4096,
+   detect again and embed from that; drop it afterwards.
+
+Most of this Drive has people in it: in the first 1,000, MiniMax counted
+people in 672 of 821 photos (408 with five or more) and in 90 of 141
+videos. So expect most photos to need step 2: ~6,500 photos × ~2.6 MB
+≈ 17 GB fetched over the pass, nothing kept. MiniMax's `people_count` (in
+`files`) can order the work, not decide it: it misses faces in posters and
+screenshots.
+
+**Limits.** Side profiles, sunglasses, masks, low light and motion blur
+match poorly with any model. Video frames stay at whatever resolution the
+video has.
 
 **Privacy rules (decide before building).** Face vectors are biometric data:
 GDPR special category, and covered by Thailand's PDPA. The Drive holds
