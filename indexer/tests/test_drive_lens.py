@@ -171,5 +171,32 @@ class StoreSearchTests(unittest.TestCase):
         self.assertEqual(fts_query("the of a"), "")
 
 
+class DescribeTests(unittest.TestCase):
+    def test_quota_detection(self):
+        from drive_lens.describe import DescribeError
+        self.assertTrue(DescribeError("HTTP 429: slow down", status=429).is_quota)
+        self.assertTrue(DescribeError("provider error 2056: usage limit exceeded", status=500).is_quota)
+        self.assertFalse(DescribeError("HTTP 400: bad image", status=400).is_quota)
+        self.assertFalse(DescribeError("no JSON in the reply").is_quota)
+
+    def test_waits_through_a_limit(self):
+        from drive_lens import describe as d
+        calls = []
+
+        class D(d.Describer):
+            def _call(self, messages):
+                calls.append(1)
+                if len(calls) == 1:
+                    raise d.DescribeError("HTTP 429: limit", status=429)
+                return '{"title": "A gorilla", "tags": ["gorilla"]}', "stop", {"total_tokens": 10}
+
+        old, d.QUOTA_WAITS[:] = list(d.QUOTA_WAITS), [0]
+        try:
+            a, usage = D(base_url="x", api_key="", model="m").describe(b"jpg", {})
+        finally:
+            d.QUOTA_WAITS[:] = old
+        self.assertEqual((a["title"], len(calls), usage), ("A gorilla", 2, [{"total_tokens": 10}]))
+
+
 if __name__ == "__main__":
     unittest.main()

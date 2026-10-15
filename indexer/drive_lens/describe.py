@@ -28,6 +28,17 @@ class DescribeError(Exception):
         self.usage = usage or []
         self.status = status
 
+    @property
+    def is_quota(self) -> bool:
+        """A rate or usage limit (HTTP 429, or MiniMax's in-body codes 1002
+        rate limit / 1039 token limit / 2056 usage limit): wait, don't fail."""
+        text = str(self).lower()
+        return self.status == 429 or any(c in text for c in ("error 1002", "error 1039", "error 2056")) or "limit" in text and "exceed" in text
+
+
+# Waits when the plan's limit is reached: the M Plan meters a 5-hour rolling window.
+QUOTA_WAITS = [300, 600, 900, 1800, 1800, 1800, 3600, 3600, 3600, 3600]
+
 
 @dataclass
 class Describer:
@@ -83,6 +94,19 @@ class Describer:
                 time.sleep(wait if wait is not None else min(30.0, 2 * 2 ** attempt) * (0.75 + random.random() / 2))
         raise last  # type: ignore[misc]
 
+    def _call_waiting(self, messages: list[dict]) -> tuple[str, str, dict]:
+        """`_call`, but a rate/usage limit pauses (up to ~6 h in total) instead of failing."""
+        for wait in QUOTA_WAITS + [None]:
+            try:
+                return self._call(messages)
+            except DescribeError as e:
+                if not e.is_quota or wait is None:
+                    raise
+                import sys
+                print(f"  … model limit reached ({str(e)[:120]}); waiting {wait // 60} min", file=sys.stderr, flush=True)
+                time.sleep(wait)
+        raise AssertionError("unreachable")
+
     def describe(self, jpeg: bytes, context: dict) -> tuple[dict, list[dict]]:
         """Analyse one image. Returns (clean analysis, usage of every call made).
         A reply without a JSON object (often cut off by thinking) is retried once."""
@@ -94,7 +118,7 @@ class Describer:
         usages: list[dict] = []
         reason = ""
         for _ in range(2):
-            text, finish, usage = self._call(messages)
+            text, finish, usage = self._call_waiting(messages)
             usages.append(usage)
             try:
                 return ic.clean_analysis(ic.extract_json(text), CATEGORIES), usages
