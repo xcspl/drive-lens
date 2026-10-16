@@ -138,6 +138,7 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 860, minWidth: 720, minHeight: 520,
     title: "Drive Lens",
+    icon: path.join(here, "..", "build", "icon.png"),
     backgroundColor: "#0b0d10",
     webPreferences: { preload: path.join(here, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });

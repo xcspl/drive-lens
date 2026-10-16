@@ -1,7 +1,7 @@
 {
   "name": "drive-lens-app",
   "productName": "Drive Lens",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Search a drive-lens index: find any file in a shared Google Drive by what it shows.",
   "license": "GPL-3.0-or-later",
   "private": true,
@@ -43,12 +43,14 @@
     "productName": "Drive Lens",
     "artifactName": "Drive-Lens-${version}-${os}-${arch}.${ext}",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "electron/**",
       "dist/**",
       "package.json",
+      "build/icon.png",
       "!**/node_modules/@huggingface/transformers/.cache/**",
       "!**/node_modules/onnxruntime-web/**",
       "!**/node_modules/**/*.{map,md,d.ts}",
@@ -77,8 +79,10 @@
         "nsis"
       ],
       "files": [
-        "!**/node_modules/onnxruntime-node/bin/napi-v*/{darwin,linux}/**"
-      ]
+        "!**/node_modules/onnxruntime-node/bin/napi-v*/{darwin,linux}/**",
+        "!**/node_modules/onnxruntime-node/bin/napi-v*/win32/arm64/**"
+      ],
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -93,7 +97,8 @@
       "category": "public.app-category.productivity",
       "files": [
         "!**/node_modules/onnxruntime-node/bin/napi-v*/{linux,win32}/**"
-      ]
+      ],
+      "icon": "build/icon.png"
     },
     "linux": {
       "target": [
@@ -101,8 +106,10 @@
       ],
       "category": "Utility",
       "files": [
-        "!**/node_modules/onnxruntime-node/bin/napi-v*/{darwin,win32}/**"
-      ]
+        "!**/node_modules/onnxruntime-node/bin/napi-v*/{darwin,win32}/**",
+        "!**/node_modules/onnxruntime-node/bin/napi-v*/linux/arm64/**"
+      ],
+      "icon": "build/icon.png"
     }
   }
 }
