@@ -13,7 +13,9 @@
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "parity": "node scripts/run-as-node.mjs scripts/parity.mjs",
     "typecheck": "tsc --noEmit -p .",
-    "app": "node scripts/start.mjs"
+    "app": "node scripts/start.mjs",
+    "fetch-model": "node scripts/fetch-model.mjs",
+    "dist": "vite build && node scripts/fetch-model.mjs && electron-builder"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.0",
@@ -29,10 +31,78 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",
     "electron": "43.7.7",
+    "electron-builder": "26.17.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.1"
+  },
+  "build": {
+    "appId": "com.xcspl.drivelens",
+    "productName": "Drive Lens",
+    "artifactName": "Drive-Lens-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**",
+      "dist/**",
+      "package.json",
+      "!**/node_modules/@huggingface/transformers/.cache/**",
+      "!**/node_modules/onnxruntime-web/**",
+      "!**/node_modules/**/*.{map,md,d.ts}",
+      "!**/node_modules/better-sqlite3/{deps,src}/**"
+    ],
+    "extraResources": [
+      {
+        "from": "models",
+        "to": "models",
+        "filter": [
+          "**/*",
+          "!**/*.part"
+        ]
+      }
+    ],
+    "asarUnpack": [
+      "**/*.node",
+      "**/node_modules/sqlite-vec-*/**",
+      "**/node_modules/onnxruntime-node/bin/**",
+      "**/node_modules/sharp/**",
+      "**/node_modules/@img/**"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "files": [
+        "!**/node_modules/onnxruntime-node/bin/napi-v*/{darwin,linux}/**"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Drive-Lens-Setup-${version}-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity",
+      "files": [
+        "!**/node_modules/onnxruntime-node/bin/napi-v*/{linux,win32}/**"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility",
+      "files": [
+        "!**/node_modules/onnxruntime-node/bin/napi-v*/{darwin,win32}/**"
+      ]
+    }
   }
 }

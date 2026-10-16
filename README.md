@@ -10,6 +10,17 @@ you remember things: *"tiger on a camera trap at night"*, *"rangers training
 with villagers"*, *"poster with an elephant"*, *"slide about the 2024
 budget"*.
 
+> **Built on EmbeddingGemma 2.** Search by meaning uses Google's
+> [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2), an
+> open-weight embedding model that puts **images and text in one vector
+> space**. Every photo is indexed by its pixels, and you find it by typing
+> words, with no captions needed for that part. It is small enough to index
+> on an 8 GB machine's GPU. Its text side runs inside the app (ONNX, 8-bit,
+> ~314 MB), so queries never leave your computer. drive-lens v1 is built
+> around it: the indexer defaults to it, and ready-made app builds ship
+> with its query model inside. If you've been looking for a practical use
+> of a multimodal embedder on your own files, this is one.
+
 - **No Google login.** It works from the folder's share link ("Anyone with
   the link"). No Google account, OAuth app or API key is needed.
 - **Nothing is copied.** It looks at Drive's own preview images and keeps
@@ -106,8 +117,9 @@ Which index the app opens, in order:
    index to colleagues together with the app;
 4. the first one in `data/`, when running from the repo.
 
-On first launch the app downloads its query model (~314 MB) once; after
-that it works offline.
+Run from the repo, the app downloads its query model (~314 MB) on first
+launch, once; after that it works offline. Built apps (below) carry it
+inside and never download anything.
 
 On macOS, an app that's still quarantined (just downloaded, unsigned)
 runs from a hidden copy, so it can't see files next to it. Move the app
@@ -174,14 +186,22 @@ text in the picture, the setting, a people count and a "sensitive" flag.
 Rate and usage limits (HTTP 429, or a plan's usage window) pause the run
 and resume it, rather than failing.
 
-### Choosing an embedding model
+### The embedding model: EmbeddingGemma 2 (v1)
 
-The default, [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2),
-embeds images and text into one space: files are indexed by their picture
-and found by your words. Another model works if sentence-transformers can
-load it and it embeds images and text into the same space. Set
-`DRIVE_LENS_EMBED_MODEL`, and for the app, `DRIVE_LENS_QUERY_MODEL`
-(an ONNX build of the same model) and its query prompt.
+v1 assumes [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2)
+on both sides, and is tested only with it:
+
+| | |
+|---|---|
+| Indexer | `google/embeddinggemma-2`, PyTorch through sentence-transformers. It embeds each file's preview image; a PDF is embedded as its preview plus its text. 768-d vectors. ~1.6 s per image on an M1 GPU. |
+| App | `onnx-community/embeddinggemma-2-ONNX`: the text side only, 8-bit, ~314 MB, pinned to one revision and shipped inside built apps. It embeds queries with the model's own search prompt (`task: search result \| query: `). |
+| Agreement | App query vectors against the indexer's PyTorch float32 ones: cosine 1.0000, with the same top 5 for 12 of 12 test queries. |
+
+The settings are there for experiments: `DRIVE_LENS_EMBED_MODEL` for the
+indexer; `DRIVE_LENS_QUERY_MODEL` and `DRIVE_LENS_QUERY_PREFIX` for the
+app, when run from source. Another model can work if sentence-transformers
+can load it, it embeds images and text into one space, and an ONNX build of
+its text side exists for the app. A built app always carries EmbeddingGemma 2.
 
 One index holds one model's vectors. The vector table is sized from the
 model on the first run, and a later run with a different model stops with
@@ -282,8 +302,43 @@ terms suit your files, or run one locally.
 
 ## Platforms and troubleshooting
 
-The indexer and the app both run on macOS, Linux and Windows. Ready-made
-app installers aren't published yet: build the app from source as above.
+The indexer and the app both run on macOS, Linux and Windows.
+
+### Building the app
+
+```sh
+cd app
+npm install
+npm run dist        # build the window, fetch the query model into app/models/, package
+```
+
+`npm run dist` builds for the system it runs on, into `app/release/`:
+
+| System | What you get |
+|---|---|
+| Windows | `Drive-Lens-…-win-x64.exe`: a portable app, one file, no install. Also `Drive-Lens-Setup-…-x64.exe`, an installer (NSIS). |
+| macOS | `Drive-Lens-…-mac-arm64.dmg` |
+| Linux | `Drive-Lens-…-linux-x86_64.AppImage`: one file, no install. |
+
+- **What's inside:** Electron, the app, its native modules (SQLite,
+  sqlite-vec, onnxruntime) and the EmbeddingGemma 2 query model.
+- **Size:** about 470 MB. The model is 331 MB of that.
+- **It doesn't need** Node, Python or a network connection.
+- **To build for all three systems,** run it on each one, or in CI on
+  each kind of machine. Native modules don't cross-compile.
+
+**To hand it out,** put the app and the index in one folder:
+
+```
+Drive Lens/
+  Drive-Lens-0.1.0-win-x64.exe
+  photo-library.db
+```
+
+Opening the app opens the index next to it.
+
+The builds aren't code-signed. Windows SmartScreen warns once ("More info"
+→ "Run anyway"). macOS asks you to right-click → Open the first time.
 
 - **The app opens as a plain Node process, or exits at once,** when started
   from a VS Code terminal. VS Code sets `ELECTRON_RUN_AS_NODE`.

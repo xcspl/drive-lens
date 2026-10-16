@@ -98,6 +98,20 @@ graph also takes image/video/audio feature inputs; a query passes empty
 `[0, 512]` tensors. Against the indexer's PyTorch float32 query vectors:
 cosine 1.0000 and the same top 5 for 12 of 12 queries.
 
+**The query model ships inside built apps.** `npm run dist` runs
+`scripts/fetch-model.mjs`, which puts EmbeddingGemma 2's ONNX text model
+(5 files, 331 MB, pinned revision, sizes checked) in `app/models/`.
+electron-builder copies that folder to the app's resources, and the app
+reads it with remote downloads off. A packaged Linux build was tested on
+2026-10-16 with a fresh profile and the index next to it: no download, the
+same top three as the Python indexer. Bundling costs size (AppImage 474 MB,
+~145 MB without the model). It buys a first launch that works offline, and a
+query model that can't drift from the one the index was checked against.
+Native code has to sit outside the asar archive: the `.node` binaries,
+onnxruntime's libraries, and sqlite-vec's loadable library (which SQLite
+opens by path, so `search.js` points at `app.asar.unpacked`). Each platform
+build drops the other platforms' onnxruntime binaries.
+
 **Every run is a sync.** `run` lists the Drive first, then processes only
 files not done. A listing compares by Drive file id: new → added, same id with
 a new path or name → updated in place (no new model call), not seen → removed.

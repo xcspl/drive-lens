@@ -4,9 +4,13 @@
 // use and cached.
 //
 // Default: EmbeddingGemma 2's ONNX build (~314 MB at q8), matching the
-// indexer's default google/embeddinggemma-2. Another model is set with
+// indexer's default google/embeddinggemma-2. Builds carry it inside
+// (scripts/fetch-model.mjs → app/models/, `bundledDir`), so it is read from
+// there with no network; otherwise it is downloaded once. Another model is set with
 // DRIVE_LENS_QUERY_MODEL (and its query prompt with DRIVE_LENS_QUERY_PREFIX);
 // it must be the same model the index was built with.
+import fs from "node:fs";
+import path from "node:path";
 import { AutoConfig, AutoModel, AutoTokenizer, Tensor, env } from "@huggingface/transformers";
 
 export const DEFAULT_MODEL = "onnx-community/embeddinggemma-2-ONNX";
@@ -17,16 +21,21 @@ let state = null;
 let modelId = DEFAULT_MODEL;
 let prefix = DEFAULT_PREFIX;
 
-/** Load once. `model`/`queryPrefix` override the defaults; `cacheDir`: where
- *  the model files go; `onProgress` gets transformers.js progress events. */
-export function loadEmbedder({ model, queryPrefix, dtype = "q8", cacheDir, onProgress } = {}) {
+/** Load once. `model`/`queryPrefix` override the defaults; `bundledDir`: a
+ *  folder holding <model id>/… that ships with the app; `cacheDir`: where a
+ *  downloaded model goes; `onProgress` gets transformers.js progress events. */
+export function loadEmbedder({ model, queryPrefix, dtype = "q8", bundledDir, cacheDir, onProgress } = {}) {
   if (state) return state;
   if (model) modelId = model;
   // .env values lose trailing spaces; a prompt ends in one.
   if (queryPrefix !== undefined) prefix = queryPrefix && !queryPrefix.endsWith(" ") ? queryPrefix + " " : queryPrefix;
   else if (model && model !== DEFAULT_MODEL) prefix = "";
   if (cacheDir) env.cacheDir = cacheDir;
-  env.allowRemoteModels = true;
+  const bundled = bundledDir && fs.existsSync(path.join(bundledDir, modelId, "config.json"));
+  env.localModelPath = bundled ? bundledDir : env.localModelPath;
+  env.allowLocalModels = !!bundled;
+  env.allowRemoteModels = !bundled;
+  source = bundled ? "bundled" : "downloaded";
   state = (async () => {
     const config = await AutoConfig.from_pretrained(modelId);
     config.vision_config = config.audio_config = null; // text only: queries are words
@@ -40,7 +49,8 @@ export function loadEmbedder({ model, queryPrefix, dtype = "q8", cacheDir, onPro
   return state;
 }
 
-export const queryModel = () => modelId;
+let source = "";
+export const queryModel = () => ({ id: modelId, source });
 
 /** A normalized query vector (Float32Array), as wide as the model makes them. */
 export async function embedQuery(text) {

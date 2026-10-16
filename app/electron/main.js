@@ -47,6 +47,7 @@ function startModel() {
   const files = {};
   loadEmbedder({
     model: conf.DRIVE_LENS_QUERY_MODEL || undefined,
+    bundledDir: app.isPackaged ? path.join(process.resourcesPath, "models") : path.resolve(here, "..", "models"),
     queryPrefix: conf.DRIVE_LENS_QUERY_PREFIX || undefined,
     cacheDir: path.join(app.getPath("userData"), "models"),
     onProgress: (p) => {

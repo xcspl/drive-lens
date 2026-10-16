@@ -50,11 +50,15 @@ export function ftsQueries(pq) {
   return out;
 }
 
+// sqlite-vec's loadable library. In a packaged app it is unpacked next to
+// the archive (asarUnpack): SQLite cannot load an extension from inside it.
+const vecPath = () => sqliteVec.getLoadablePath().replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
+
 const hasVec = () => !!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'files_vec'").get();
 
 export function openIndex(path) {
   const next = new Database(path, { readonly: true, fileMustExist: true });
-  sqliteVec.load(next);
+  next.loadExtension(vecPath());
   next.prepare("SELECT 1 FROM files LIMIT 1").get(); // fails early on a file that is not an index
   db?.close();
   db = next;
