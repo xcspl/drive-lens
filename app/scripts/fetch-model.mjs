@@ -42,4 +42,11 @@ for (const f of FILES) {
   console.log(`fetched ${f}`);
 }
 fs.writeFileSync(path.join(out, "REVISION"), REVISION + "\n");
+// Shipped with the app: the model is Apache-2.0, which asks for its licence notice to travel with it.
+fs.writeFileSync(path.join(out, "NOTICE.txt"), `EmbeddingGemma 2 (ONNX build, text model, 8-bit)
+Source:   https://huggingface.co/${MODEL} (revision ${REVISION})
+Original: https://huggingface.co/google/embeddinggemma-2
+License:  Apache License 2.0 — https://www.apache.org/licenses/LICENSE-2.0
+Redistributed unmodified inside Drive Lens (https://github.com/xcspl/drive-lens).
+`);
 console.log(`→ ${out}`);

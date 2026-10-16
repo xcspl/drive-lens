@@ -103,6 +103,14 @@ for the default).
 
 ### 2. Search it
 
+**Ready-made apps** for Windows, macOS and Linux are on the
+[Releases](https://github.com/xcspl/drive-lens/releases) page, with the
+query model inside: download, put your `.db` next to the app, and open it.
+They're built by [GitHub Actions](.github/workflows/build-app.yml) from
+each version tag.
+
+Or run it from source:
+
 ```sh
 cd app
 npm install
@@ -324,8 +332,12 @@ npm run dist        # build the window, fetch the query model into app/models/, 
   sqlite-vec, onnxruntime) and the EmbeddingGemma 2 query model.
 - **Size:** about 470 MB. The model is 331 MB of that.
 - **It doesn't need** Node, Python or a network connection.
-- **To build for all three systems,** run it on each one, or in CI on
-  each kind of machine. Native modules don't cross-compile.
+- **To build for all three systems,** run it on each one: native modules
+  don't cross-compile. The repo's workflow does exactly that on GitHub's
+  Windows, macOS and Linux machines, and publishes a Release for every
+  `v*` tag: `git tag v0.2.0 && git push origin v0.2.0`.
+- **The model's licence:** EmbeddingGemma 2 is Apache-2.0. Its notice
+  ships inside the app as `resources/models/…/NOTICE.txt`.
 
 **To hand it out,** put the app and the index in one folder:
 
