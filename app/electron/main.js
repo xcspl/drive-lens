@@ -59,23 +59,42 @@ function startModel() {
   }).then(() => setModel({ state: "ready", progress: 1 }), (e) => setModel({ state: "error", error: String(e?.message || e) }));
 }
 
-/** The index to open at start: DRIVE_LENS_DB, else the last one opened, else
- *  the first one in the data folder (DRIVE_LENS_DATA, default ../data). */
-function initialIndex() {
-  if (conf.DRIVE_LENS_DB) {
-    const p = fromEnvDir(conf.DRIVE_LENS_DB);
-    if (fs.existsSync(p)) return p;
-  }
+/** The folders an installed app sits in. Packaged apps run from inside a
+ *  bundle or a temporary mount, so the folder the user sees is found per
+ *  format: Windows portable exe, Linux AppImage, macOS .app, else the exe's. */
+function besideApp() {
+  if (!app.isPackaged) return [];
+  const dirs = [process.env.PORTABLE_EXECUTABLE_DIR, process.env.APPIMAGE && path.dirname(process.env.APPIMAGE)];
+  const exe = app.getPath("exe");
+  const bundle = exe.match(/^(.*)[\\/][^\\/]+\.app[\\/]Contents[\\/]MacOS[\\/]/);
+  dirs.push(bundle ? bundle[1] : path.dirname(exe));
+  return [...new Set(dirs.filter(Boolean))];
+}
+
+/** .db files in a folder, newest first. */
+function dbFiles(dir) {
+  try {
+    return fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".db"))
+      .map((f) => path.join(dir, f)).sort((x, y) => fs.statSync(y).mtimeMs - fs.statSync(x).mtimeMs);
+  } catch { return []; }
+}
+
+/** Indexes to try at start, in order: DRIVE_LENS_DB; the one last opened
+ *  (with Open index…); a .db next to the app (so an index handed out in the
+ *  same folder as the app just opens); the data folder of a checkout
+ *  (DRIVE_LENS_DATA, default ../data). The first that opens wins. */
+function initialIndexes() {
+  const out = [];
+  if (conf.DRIVE_LENS_DB) out.push(fromEnvDir(conf.DRIVE_LENS_DB));
   const last = readSettings().indexPath;
-  if (last && fs.existsSync(last)) return last;
+  if (last) out.push(last);
+  for (const d of besideApp()) out.push(...dbFiles(d));
   const dataDir = conf.DRIVE_LENS_DATA ? fromEnvDir(conf.DRIVE_LENS_DATA) : path.resolve(here, "..", "..", "data");
   try {
-    for (const d of fs.readdirSync(dataDir)) {
-      const p = path.join(dataDir, d, "index.db");
-      if (fs.existsSync(p)) return p;
-    }
+    for (const d of fs.readdirSync(dataDir)) out.push(path.join(dataDir, d, "index.db"));
   } catch { /* no data folder */ }
-  return "";
+  out.push(...dbFiles(dataDir));
+  return [...new Set(out)].filter((p) => fs.existsSync(p));
 }
 
 function tryOpen(p) {
@@ -130,8 +149,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  const p = initialIndex();
-  if (p) tryOpen(p);
+  for (const p of initialIndexes()) if (tryOpen(p).ok) break;
   createWindow();
   startModel();
 });

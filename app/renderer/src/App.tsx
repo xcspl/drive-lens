@@ -116,7 +116,7 @@ export default function App() {
       <main className="flex-1 overflow-y-auto px-5 py-5">
         {!info && (
           <Empty title="Open an index to start">
-            Drive Lens searches an index built by <code>drive-lens</code> (a <code>.db</code> file). {openErr && <span className="text-red-500">{openErr}</span>}
+            Drive Lens searches an index built by <code>drive-lens</code> (a <code>.db</code> file). Put the file in the same folder as this app and it opens by itself next time, or open it from anywhere. {openErr && <span className="text-red-500">{openErr}</span>}
             <div className="mt-4"><button onClick={choose} className="rounded-md bg-accent px-4 py-2 text-sm text-accent-ink">Open index…</button></div>
           </Empty>
         )}

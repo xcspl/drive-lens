@@ -99,10 +99,19 @@ npm run rebuild     # builds the SQLite module for Electron
 npm start           # builds the window and opens the app
 ```
 
-The app opens the index named by `DRIVE_LENS_DB`, or the last one you
-opened, or the first one in `data/`. **Open index…** picks any other
-`.db` file. On first launch it downloads its query model (~314 MB) once;
-after that it works offline.
+Which index the app opens, in order:
+1. `DRIVE_LENS_DB`, when set;
+2. the one you last opened with **Open index…**;
+3. a `.db` file in the same folder as the app, which is how to hand an
+   index to colleagues together with the app;
+4. the first one in `data/`, when running from the repo.
+
+On first launch the app downloads its query model (~314 MB) once; after
+that it works offline.
+
+On macOS, an app that's still quarantined (just downloaded, unsigned)
+runs from a hidden copy, so it can't see files next to it. Move the app
+to another folder first, or use **Open index…**.
 
 ## Configuration
 
