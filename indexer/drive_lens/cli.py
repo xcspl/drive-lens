@@ -46,9 +46,10 @@ def cmd_run(s: config.Settings, a) -> int:
         raise SystemExit("The index is empty: nothing was found at the share link.")
     describer = None
     if not a.no_describe:
-        if not s.model_key:
-            raise SystemExit("MINIMAX_API_KEY is empty in .env (or pass --no-describe)")
-        describer = Describer(base_url=s.base_url, api_key=s.model_key, model=s.model, effort=a.effort or s.effort)
+        if not s.llm_api_key and not a.allow_no_key:
+            raise SystemExit("DRIVE_LENS_LLM_API_KEY is empty in .env (pass --allow-no-key for a local server, or --no-describe)")
+        describer = Describer(base_url=s.llm_base_url, api_key=s.llm_api_key, model=s.llm_model,
+                              effort=a.effort if a.effort is not None else s.llm_effort, format=s.llm_format)
     r = process(conn, source_for(s.google_api_key), Embedder(a.device), describer, kinds=a.kinds.split(","),
                 limit=a.limit, sample=a.sample, batch=a.batch, concurrency=a.concurrency, retry_errors=a.retry_errors,
                 retry_skipped=a.retry_skipped)
@@ -76,7 +77,7 @@ def cmd_status(s: config.Settings, a) -> int:
         raise SystemExit(f"No index yet at {s.db_path}: run `drive-lens list`.")
     conn = store.connect(s.db_path, readonly=True)
     st = store.stats(conn)
-    st["minimax"] = usage_summary(st)
+    st["describer"] = usage_summary(st)
     if not a.verbose:
         st["locked_folders"] = [f["path"] or f["id"] for f in st["locked_folders"]]
         st.pop("usage")
@@ -136,7 +137,8 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--kinds", default=",".join(KINDS), help=f"comma list (default {','.join(KINDS)})")
     sp.add_argument("--batch", type=int, default=16)
     sp.add_argument("--concurrency", type=int, default=4, help="parallel previews/descriptions (default 4)")
-    sp.add_argument("--effort", help="describer reasoning_effort: low|medium|high|xhigh|max (default from .env, else medium)")
+    sp.add_argument("--effort", help="describer reasoning effort, e.g. low|medium|high (default DRIVE_LENS_LLM_EFFORT; '' = the provider's default)")
+    sp.add_argument("--allow-no-key", action="store_true", help="call the describer without an API key (a local server such as Ollama)")
     sp.add_argument("--device", help="cpu|mps|cuda (default: best available)")
     sp.add_argument("--no-describe", action="store_true", help="vectors only, no model calls")
     sp.add_argument("--retry-errors", action="store_true", help="also retry files that failed before (up to 3 attempts)")

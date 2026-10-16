@@ -7,6 +7,7 @@ export type Result = {
 export type IndexInfo = {
   path: string; rootId: string; listedAt: string; files: number; described: number; vectors: number;
   lockedFolders: string[]; kinds: Record<string, number>; kindsDone: Record<string, number>;
+  dims: number; embedModel: string; examples: string[];
 };
 export type ModelState = { state: "idle" | "loading" | "ready" | "error"; progress: number; error: string };
 

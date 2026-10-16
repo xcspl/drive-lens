@@ -50,6 +50,8 @@ export function ftsQueries(pq) {
   return out;
 }
 
+const hasVec = () => !!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'files_vec'").get();
+
 export function openIndex(path) {
   const next = new Database(path, { readonly: true, fileMustExist: true });
   sqliteVec.load(next);
@@ -70,7 +72,11 @@ export function info() {
     listedAt: meta.listed_at || "",
     files: n("SELECT COUNT(*) n FROM files"),
     described: n("SELECT COUNT(*) n FROM files WHERE status = 'done'"),
-    vectors: n("SELECT COUNT(*) n FROM files_vec"),
+    vectors: hasVec() ? n("SELECT COUNT(*) n FROM files_vec") : 0,
+    dims: Number(meta.dims || 0),
+    // Search ideas for the start screen: titles of a few files from this index.
+    examples: db.prepare("SELECT lower(title) t FROM files WHERE status = 'done' AND title IS NOT NULL AND length(title) BETWEEN 8 AND 40 ORDER BY random() LIMIT 5").all().map((r) => r.t),
+    embedModel: meta.embed_model_id || meta.embed_model || "",
     lockedFolders: db.prepare("SELECT path FROM folders WHERE locked = 1 ORDER BY path").all().map((r) => r.path),
     kinds: Object.fromEntries(db.prepare("SELECT kind, COUNT(*) n FROM files GROUP BY kind").all().map((r) => [r.kind, r.n])),
     kindsDone: Object.fromEntries(db.prepare("SELECT kind, COUNT(*) n FROM files WHERE status = 'done' GROUP BY kind").all().map((r) => [r.kind, r.n])),
@@ -97,8 +103,10 @@ export async function search(q, { k = 60, kind = "", all = false } = {}) {
   const banned = pq.exclude.length ? matching(pq.exclude.map(term).join(" OR ")) : new Set();
 
   const text = [...pq.phrases, ...pq.words].join(" ");
-  if (text && db.prepare("SELECT 1 FROM files_vec LIMIT 1").get()) {
+  if (text && hasVec() && db.prepare("SELECT 1 FROM files_vec LIMIT 1").get()) {
     const v = await embedQuery(text);
+    const dims = Number(db.prepare("SELECT value FROM meta WHERE key = 'dims'").get()?.value || v.length);
+    if (v.length !== dims) throw new Error(`The query model makes ${v.length}-d vectors but this index holds ${dims}-d ones: set DRIVE_LENS_QUERY_MODEL to the model the index was built with.`);
     db.prepare("SELECT rowid, distance FROM files_vec WHERE embedding MATCH ? AND k = ? ORDER BY distance")
       .all(Buffer.from(v.buffer), POOL)
       .filter((h) => 1 - h.distance >= MIN_SIM && !banned.has(h.rowid) && (!must || must.has(h.rowid)))

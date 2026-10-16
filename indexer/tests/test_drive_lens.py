@@ -35,12 +35,15 @@ def entry(fid, name, folder=False, mime="image/jpeg"):
             f'<div class="flip-entry-title">{name}</div></a><div class="flip-entry-last-modified"><div>Sep 1</div></div></div>')
 
 
+DIMS = 768
+
+
 class FakeEmbedder:
     """Maps a few words to fixed directions, so 'meaning' search is predictable."""
     AXES = ["gorilla", "elephant", "tiger"]
 
     def vec(self, word):
-        v = np.zeros(store.DIMS, dtype=np.float32)
+        v = np.zeros(DIMS, dtype=np.float32)
         v[self.AXES.index(word) if word in self.AXES else 3] = 1.0
         return v
 
@@ -95,19 +98,30 @@ class ConfigTests(unittest.TestCase):
     def test_read_env(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / ".env"
-            p.write_text("# c\nDRIVE_LENS_SHARE_LINK=https://drive.google.com/drive/folders/ABCDEFGHIJKL\nMINIMAX_API_KEY=sk-x  # note\nEMPTY=\n")
+            p.write_text("# c\nDRIVE_LENS_SHARE_LINK=https://drive.google.com/drive/folders/ABCDEFGHIJKL\nDRIVE_LENS_LLM_API_KEY=sk-x  # note\nEMPTY=\n")
             env = config.read_env(p)
-            self.assertEqual(env["MINIMAX_API_KEY"], "sk-x")
+            self.assertEqual(env["DRIVE_LENS_LLM_API_KEY"], "sk-x")
             self.assertEqual(env["EMPTY"], "")
             s = config.load(str(p))
-            self.assertEqual(s.root_id, "ABCDEFGHIJKL")
+            self.assertEqual((s.root_id, s.llm_api_key, s.llm_format), ("ABCDEFGHIJKL", "sk-x", "openai"))
             self.assertEqual(s.db_path, Path(d) / "data" / "ABCDEFGHIJKL" / "index.db")
+
+    def test_db_path_and_format(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / ".env"
+            p.write_text("DRIVE_LENS_SHARE_LINK=ABCDEFGHIJKL\nDRIVE_LENS_DB=idx/my.db\nDRIVE_LENS_LLM_FORMAT=Anthropic\n")
+            s = config.load(str(p))
+            self.assertEqual((s.db_path, s.llm_format), (Path(d) / "idx" / "my.db", "anthropic"))
+            p.write_text("DRIVE_LENS_SHARE_LINK=ABCDEFGHIJKL\nDRIVE_LENS_LLM_FORMAT=gemini\n")
+            with self.assertRaises(SystemExit):
+                config.load(str(p))
 
 
 class StoreSearchTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.conn = store.connect(Path(self.tmp.name) / "i.db")
+        store.ensure_vec(self.conn, DIMS, "fake")
         self.emb = FakeEmbedder()
 
     def tearDown(self):
@@ -123,7 +137,7 @@ class StoreSearchTests(unittest.TestCase):
 
     def test_round_trip_and_hybrid(self):
         self.add("g1", "Photo Library/Gorilla/Gorilla Trek/IMG_1.jpg")
-        self.add("e1", "posters/Freeland_Brighter_World_Elephant_Campaign.png")
+        self.add("e1", "posters/Brighter_World_Elephant_Campaign.png")
         self.add("t1", "Camera Trap footage/tigers/clip.MP4", kind="video")
         self.add("d1", "Reports/Annual report 2025.docx", kind="document")
         for fid, word, title in [("g1", "gorilla", "Hikers on a forest trek"), ("e1", "elephant", "A brighter world poster"),
@@ -226,7 +240,36 @@ class StoreSearchTests(unittest.TestCase):
         self.assertEqual(ids, ["p1"])
 
 
+class VectorTableTests(unittest.TestCase):
+    def test_sized_by_the_model_and_guarded(self):
+        with tempfile.TemporaryDirectory() as d:
+            conn = store.connect(Path(d) / "i.db")
+            self.assertFalse(store.has_vec(conn))
+            self.assertEqual(store.stats(conn)["vectors"], 0)
+            store.ensure_vec(conn, 4, "model-a")
+            store.ensure_vec(conn, 4, "model-a")  # same model again: fine
+            with self.assertRaises(SystemExit):
+                store.ensure_vec(conn, 8, "model-b")
+
+
 class DescribeTests(unittest.TestCase):
+    def test_wire_formats(self):
+        from drive_lens.describe import Describer
+        url, headers, body = Describer(base_url="https://a/v1/", api_key="k", model="m", effort="low")._request("sys", "QUJD", "ctx")
+        self.assertEqual((url, headers["Authorization"], body["reasoning_effort"]), ("https://a/v1/chat/completions", "Bearer k", "low"))
+        self.assertEqual(body["messages"][0], {"role": "system", "content": "sys"})
+        self.assertTrue(body["messages"][1]["content"][0]["image_url"]["url"].startswith("data:image/jpeg;base64,QUJD"))
+        an = Describer(base_url="https://b/v1", api_key="k", model="m", format="anthropic")
+        url, headers, body = an._request("sys", "QUJD", "ctx")
+        self.assertEqual((url, headers["x-api-key"], body["system"][0]["text"]), ("https://b/v1/messages", "k", "sys"))
+        self.assertEqual(body["messages"][0]["content"][0]["source"]["data"], "QUJD")
+        self.assertNotIn("output_config", body)  # no effort set: the provider's default
+        text, stop, usage = an._parse({"content": [{"type": "thinking", "thinking": "hm"}, {"type": "text", "text": "{}"}],
+                                       "stop_reason": "end_turn",
+                                       "usage": {"input_tokens": 10, "cache_read_input_tokens": 90, "output_tokens": 5}})
+        self.assertEqual((text, stop, usage["prompt_tokens"], usage["prompt_tokens_details"]["cached_tokens"], usage["completion_tokens"]),
+                         ("{}", "end_turn", 100, 90, 5))
+
     def test_quota_detection(self):
         from drive_lens.describe import DescribeError
         self.assertTrue(DescribeError("HTTP 429: slow down", status=429).is_quota)

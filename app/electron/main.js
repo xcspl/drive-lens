@@ -8,6 +8,26 @@ import { loadEmbedder } from "./embedder.js";
 import { browse, info, openIndex, search } from "./search.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+// Settings shared with the indexer: the repo's .env (when the app runs from
+// a checkout), overridden by real environment variables. Only DRIVE_LENS_*
+// keys are read; the LLM key is never needed here.
+const envFile = process.env.DRIVE_LENS_ENV || path.resolve(here, "..", "..", ".env");
+function readEnv(file) {
+  const out = {};
+  try {
+    for (let line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+      line = line.trim();
+      if (!line || line.startsWith("#") || !line.includes("=")) continue;
+      const i = line.indexOf("=");
+      const k = line.slice(0, i).trim();
+      if (k.startsWith("DRIVE_LENS_")) out[k] = line.slice(i + 1).split(/\s+#/)[0].trim().replace(/^(["'])(.*)\1$/, "$2");
+    }
+  } catch { /* no .env: defaults */ }
+  return out;
+}
+const conf = { ...readEnv(envFile), ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("DRIVE_LENS_"))) };
+const fromEnvDir = (p) => (path.isAbsolute(p) ? p : path.resolve(path.dirname(envFile), p));
 const settingsFile = () => path.join(app.getPath("userData"), "settings.json");
 const readSettings = () => { try { return JSON.parse(fs.readFileSync(settingsFile(), "utf8")); } catch { return {}; } };
 const writeSettings = (s) => { fs.mkdirSync(path.dirname(settingsFile()), { recursive: true }); fs.writeFileSync(settingsFile(), JSON.stringify(s, null, 1)); };
@@ -26,6 +46,8 @@ function startModel() {
   setModel({ state: "loading", progress: 0, error: "" });
   const files = {};
   loadEmbedder({
+    model: conf.DRIVE_LENS_QUERY_MODEL || undefined,
+    queryPrefix: conf.DRIVE_LENS_QUERY_PREFIX || undefined,
     cacheDir: path.join(app.getPath("userData"), "models"),
     onProgress: (p) => {
       if (p.status === "progress" && p.total) {
@@ -37,11 +59,16 @@ function startModel() {
   }).then(() => setModel({ state: "ready", progress: 1 }), (e) => setModel({ state: "error", error: String(e?.message || e) }));
 }
 
-/** The index to open at start: the last one used, else one found next to the app (development). */
+/** The index to open at start: DRIVE_LENS_DB, else the last one opened, else
+ *  the first one in the data folder (DRIVE_LENS_DATA, default ../data). */
 function initialIndex() {
+  if (conf.DRIVE_LENS_DB) {
+    const p = fromEnvDir(conf.DRIVE_LENS_DB);
+    if (fs.existsSync(p)) return p;
+  }
   const last = readSettings().indexPath;
   if (last && fs.existsSync(last)) return last;
-  const dataDir = path.resolve(here, "..", "..", "data");
+  const dataDir = conf.DRIVE_LENS_DATA ? fromEnvDir(conf.DRIVE_LENS_DATA) : path.resolve(here, "..", "..", "data");
   try {
     for (const d of fs.readdirSync(dataDir)) {
       const p = path.join(dataDir, d, "index.db");

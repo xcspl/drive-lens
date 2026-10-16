@@ -46,6 +46,21 @@ for one photo); `reasoning_effort=medium` gives the same quality in 3–5 s and
 ~1,750 tokens, so it is the default, with 8,000 max tokens and one retry when
 a reply holds no JSON.
 
+**Provider-neutral.** Both models are settings, not code (`.env.example`).
+The describer speaks the two wire formats nearly every provider offers —
+OpenAI chat completions and Anthropic messages (`DRIVE_LENS_LLM_FORMAT`,
+`_BASE_URL`, `_API_KEY`, `_MODEL`, `_EFFORT`) — so a hosted model, a proxy
+or a local server (Ollama, vLLM) all work; usage is normalized to one shape
+for the token accounting. The anthropic format marks the fixed instructions
+with `cache_control`: on MiniMax that cached 570 of 571 input tokens of a
+call, against 178 in the openai format (2026-10-16). The embedder is
+`DRIVE_LENS_EMBED_MODEL` (any sentence-transformers model that embeds
+images and text into one space); the vector table is sized from the model
+on the first run, and an index refuses vectors from a second model
+(meta `embed_model_id`, `dims`). The app's query model is
+`DRIVE_LENS_QUERY_MODEL` (the same model's ONNX text side) and checks the
+width against the index. `DRIVE_LENS_DB` names the index file for both.
+
 **One SQLite file is the contract.** Listing, descriptions, 256 px thumbnails,
 FTS5 and sqlite-vec vectors share rowids in one file, so the Python indexer
 and the Electron app (better-sqlite3 + sqlite-vec from npm) read the same

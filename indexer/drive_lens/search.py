@@ -109,7 +109,7 @@ def search(conn, q: str, *, embedder=None, k: int = 20) -> list[dict]:
     must = _matching(conn, " AND ".join(f'"{p}"' for p in pq.phrases)) if pq.phrases else None
     banned = _matching(conn, " OR ".join(_term(w) for w in pq.exclude)) if pq.exclude else set()
 
-    if embedder is not None and pq.text and conn.execute("SELECT 1 FROM files_vec LIMIT 1").fetchone():
+    if embedder is not None and pq.text and store.has_vec(conn) and conn.execute("SELECT 1 FROM files_vec LIMIT 1").fetchone():
         qv = embedder.query(pq.text)
         hits = conn.execute("SELECT rowid, distance FROM files_vec WHERE embedding MATCH ? AND k = ? ORDER BY distance",
                             (store.pack(qv), POOL)).fetchall()

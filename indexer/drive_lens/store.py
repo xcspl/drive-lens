@@ -3,7 +3,8 @@ small thumbnails, a keyword index (FTS5) and the vectors (sqlite-vec).
 
 The search app reads the same file, so the schema is the contract:
 `files` rows are keyed by `rowid`, which is also the rowid in `files_fts`,
-`files_vec` and `thumbs`.
+`files_vec` and `thumbs`. `files_vec` is created on the first run, sized to
+the embedding model (meta `dims`); one index holds one model's vectors.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ from pathlib import Path
 import sqlite_vec
 
 SCHEMA_VERSION = 1
-DIMS = 768
 
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -50,7 +50,6 @@ CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
   name, path, title, description, details, tags, text_in_image,
   tokenize = 'porter unicode61 remove_diacritics 2'
 );
-CREATE VIRTUAL TABLE IF NOT EXISTS files_vec USING vec0(embedding float[{DIMS}] distance_metric=cosine);
 """
 
 
@@ -75,6 +74,30 @@ def connect(path: Path, *, readonly: bool = False) -> sqlite3.Connection:
         conn.execute("INSERT OR IGNORE INTO meta VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
         conn.commit()
     return conn
+
+
+def has_vec(conn: sqlite3.Connection) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'files_vec'").fetchone() is not None
+
+
+def ensure_vec(conn: sqlite3.Connection, dims: int, model: str) -> None:
+    """Create the vector table for `dims`-wide vectors, or check that the
+    existing one matches: vectors of two models cannot share an index."""
+    meta = get_meta(conn)
+    if has_vec(conn):
+        have = int(meta.get("dims") or dims)
+        if have != dims or (meta.get("embed_model_id") and meta["embed_model_id"] != model):
+            raise SystemExit(f"This index holds {have}-d vectors from {meta.get('embed_model_id') or meta.get('embed_model')}; "
+                             f"{model} makes {dims}-d ones. Point DRIVE_LENS_DB at a new file to index with another model.")
+    else:
+        conn.execute(f"CREATE VIRTUAL TABLE files_vec USING vec0(embedding float[{int(dims)}] distance_metric=cosine)")
+    set_meta(conn, dims=dims, embed_model_id=model)
+    conn.commit()
+
+
+def _drop_vec(conn: sqlite3.Connection, rowid: int) -> None:
+    if has_vec(conn):
+        conn.execute("DELETE FROM files_vec WHERE rowid = ?", (rowid,))
 
 
 def set_meta(conn: sqlite3.Connection, **kv: object) -> None:
@@ -130,7 +153,7 @@ def upsert_file(conn: sqlite3.Connection, *, id: str, name: str, mime: str, kind
                  (name, mime, kind, size, md5, modified, path, parent_id, stamp, old["rowid"]))
     if content_changed:
         conn.execute("UPDATE files SET status='listed', error=NULL, attempts=0, updated_at=? WHERE rowid=?", (stamp, old["rowid"]))
-        conn.execute("DELETE FROM files_vec WHERE rowid = ?", (old["rowid"],))
+        _drop_vec(conn, old["rowid"])
     if content_changed or moved:
         refresh_fts(conn, old["rowid"])
     return "changed" if content_changed else "moved" if moved else "same"
@@ -168,8 +191,9 @@ def remove_unseen(conn: sqlite3.Connection, stamp: str, *, force: bool = False) 
         return 0, (f"{len(gone)} of {total} files were not seen in this listing — more than the {limit} a sync may "
                    f"remove at once, so nothing was removed. If they really left the Drive, run `drive-lens list --allow-mass-removal`.")
     for rid in gone:
-        for t in ("files_fts", "files_vec", "thumbs"):
+        for t in ("files_fts", "thumbs"):
             conn.execute(f"DELETE FROM {t} WHERE rowid = ?", (rid,))
+        _drop_vec(conn, rid)
         conn.execute("DELETE FROM files WHERE rowid = ?", (rid,))
     conn.execute("DELETE FROM folders WHERE seen_at IS NOT ?", (stamp,))
     return len(gone), ""
@@ -184,7 +208,7 @@ def save_done(conn: sqlite3.Connection, rowid: int, *, analysis: dict | None, ve
         (a.get("title"), a.get("description"), a.get("details"), a.get("category"), json.dumps(a.get("tags") or []),
          a.get("text_in_image"), a.get("setting"), a.get("people_count"), 1 if a.get("sensitive") else 0 if a else None,
          described_by or None, embedded_by or None, now(), rowid))
-    conn.execute("DELETE FROM files_vec WHERE rowid = ?", (rowid,))
+    _drop_vec(conn, rowid)
     if vector is not None:
         conn.execute("INSERT INTO files_vec (rowid, embedding) VALUES (?, ?)", (rowid, pack(vector)))
     if thumb:
@@ -228,7 +252,7 @@ def stats(conn: sqlite3.Connection) -> dict:
         "folders": conn.execute("SELECT COUNT(*) FROM folders WHERE locked = 0").fetchone()[0],
         "locked_folders": [dict(r) for r in conn.execute("SELECT id, path, error FROM folders WHERE locked = 1 ORDER BY path")],
         "by_kind_status": by,
-        "vectors": conn.execute("SELECT COUNT(*) FROM files_vec").fetchone()[0],
+        "vectors": conn.execute("SELECT COUNT(*) FROM files_vec").fetchone()[0] if has_vec(conn) else 0,
         "usage": dict(u) if u else {},
         "meta": get_meta(conn),
     }

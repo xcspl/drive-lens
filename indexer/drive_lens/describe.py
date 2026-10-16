@@ -1,11 +1,18 @@
 """Descriptions: one vision-model call per image, through image-classify's
 prompt and reply parsing (title, description, details, category, tags,
 text in the image ...). The HTTP call is our own so that every call's token
-use is kept — the M Plan is a subscription with limits, so the totals matter.
+use is kept: subscriptions have limits even without a per-token price.
 
-OpenAI-compatible chat API (MiniMax, OpenRouter, an llmhub proxy ...).
-MiniMax M3.x thinks before answering and defaults to maximum effort; we send
-`reasoning_effort` (default medium) and leave room for the thinking."""
+Two wire formats, chosen by DRIVE_LENS_LLM_FORMAT:
+  openai     POST {base}/chat/completions  (OpenAI, MiniMax, OpenRouter, vLLM,
+             Ollama, LM Studio, most proxies)
+  anthropic  POST {base}/messages          (Anthropic, and providers with an
+             Anthropic-compatible endpoint)
+Usage is normalized to the OpenAI shape before it is logged.
+
+Thinking models (MiniMax M3.x defaults to maximum effort) get the effort
+from DRIVE_LENS_LLM_EFFORT when it is set, and max_tokens leaves room for
+the thinking."""
 
 from __future__ import annotations
 
@@ -43,13 +50,26 @@ class DescribeError(Exception):
     @property
     def is_quota(self) -> bool:
         """A rate or usage limit (HTTP 429, or MiniMax's in-body codes 1002
-        rate limit / 1039 token limit / 2056 usage limit): wait, don't fail."""
+        rate limit / 1039 token limit / 2056 usage limit): wait, don't fail.
+        (Anthropic's 529 "overloaded" is a 5xx and is retried in _call.)"""
         text = str(self).lower()
         return self.status == 429 or any(c in text for c in ("error 1002", "error 1039", "error 2056")) or "limit" in text and "exceed" in text
 
 
-# Waits when the plan's limit is reached: the M Plan meters a 5-hour rolling window.
+# Waits when a plan's limit is reached (MiniMax's plans meter a 5-hour rolling window).
 QUOTA_WAITS = [300, 600, 900, 1800, 1800, 1800, 3600, 3600, 3600, 3600]
+
+
+ANTHROPIC_VERSION = "2023-06-01"
+
+
+def _anthropic_usage(u: dict) -> dict:
+    """Anthropic usage → the OpenAI shape store.log_usage reads. Anthropic's
+    input_tokens leave out the cached part, so it is added back."""
+    cached = u.get("cache_read_input_tokens") or 0
+    prompt = (u.get("input_tokens") or 0) + cached + (u.get("cache_creation_input_tokens") or 0)
+    return {"prompt_tokens": prompt, "completion_tokens": u.get("output_tokens") or 0,
+            "prompt_tokens_details": {"cached_tokens": cached}}
 
 
 @dataclass
@@ -57,7 +77,8 @@ class Describer:
     base_url: str
     api_key: str
     model: str
-    effort: str = "medium"
+    effort: str = ""
+    format: str = "openai"  # openai | anthropic
     max_tokens: int = 8000
     timeout: float = 180.0
     retries: int = 4
@@ -67,28 +88,67 @@ class Describer:
     def label(self) -> str:
         return f"{self.model}@{self.effort}" if self.effort else self.model
 
-    def _call(self, messages: list[dict]) -> tuple[str, str, dict]:
-        """One completion → (text, finish_reason, usage). Retries 408/409/429/5xx and network errors."""
-        body = {"model": self.model, "messages": messages, "max_tokens": self.max_tokens, "temperature": 0.2, **self.extra}
+    def _request(self, system: str, jpeg_b64: str, text: str) -> tuple[str, dict, dict]:
+        """(url, headers, body) for one call in this describer's format."""
+        base = self.base_url.rstrip("/")
+        if self.format == "anthropic":
+            body = {
+                "model": self.model, "max_tokens": self.max_tokens, "temperature": 0.2,
+                # The instructions are the same on every call: marked for the provider's prompt cache.
+                "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                "messages": [{"role": "user", "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": jpeg_b64}},
+                    {"type": "text", "text": text},
+                ]}],
+                **self.extra,
+            }
+            if self.effort:
+                body["output_config"] = {"effort": self.effort}
+            headers = {"Content-Type": "application/json", "anthropic-version": ANTHROPIC_VERSION,
+                       **({"x-api-key": self.api_key} if self.api_key else {})}
+            return base + "/messages", headers, body
+        body = {
+            "model": self.model, "max_tokens": self.max_tokens, "temperature": 0.2,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{jpeg_b64}"}},
+                    {"type": "text", "text": text},
+                ]},
+            ],
+            **self.extra,
+        }
         if self.effort:
             body["reasoning_effort"] = self.effort
-        data = json.dumps(body).encode()
         headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {self.api_key}"} if self.api_key else {})}
+        return base + "/chat/completions", headers, body
+
+    def _parse(self, d: dict) -> tuple[str, str, dict]:
+        """A reply → (text, finish reason, usage in the OpenAI shape)."""
+        if self.format == "anthropic":
+            text = "".join(b.get("text", "") for b in d.get("content") or [] if b.get("type") == "text")
+            return text, d.get("stop_reason") or "", _anthropic_usage(d.get("usage") or {})
+        choice = (d.get("choices") or [{}])[0]
+        text = (choice.get("message") or {}).get("content") or ""
+        if isinstance(text, list):
+            text = "".join(p.get("text", "") for p in text if isinstance(p, dict))
+        base = d.get("base_resp") or {}
+        if not text and base.get("status_code"):  # MiniMax reports some failures inside a 200
+            raise DescribeError(f"provider error {base.get('status_code')}: {base.get('status_msg')}", [d.get("usage") or {}], 500)
+        return text, choice.get("finish_reason") or "", d.get("usage") or {}
+
+    def _call(self, request: tuple[str, dict, dict]) -> tuple[str, str, dict]:
+        """One completion → (text, finish_reason, usage). Retries 408/409/429/5xx and network errors."""
+        url, headers, body = request
+        data = json.dumps(body).encode()
         last: Exception | None = None
         for attempt in range(self.retries + 1):
-            req = urllib.request.Request(self.base_url.rstrip("/") + "/chat/completions", data=data, headers=headers, method="POST")
+            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
             wait = None
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as r:
                     d = json.loads(r.read())
-                choice = (d.get("choices") or [{}])[0]
-                text = (choice.get("message") or {}).get("content") or ""
-                if isinstance(text, list):
-                    text = "".join(p.get("text", "") for p in text if isinstance(p, dict))
-                base = d.get("base_resp") or {}
-                if not text and base.get("status_code"):  # MiniMax reports some failures inside a 200
-                    raise DescribeError(f"provider error {base.get('status_code')}: {base.get('status_msg')}", [d.get("usage") or {}], 500)
-                return text, choice.get("finish_reason") or "", d.get("usage") or {}
+                return self._parse(d)
             except urllib.error.HTTPError as e:
                 detail = e.read().decode("utf-8", "replace")[:300]
                 last = DescribeError(f"HTTP {e.code}: {detail}", status=e.code)
@@ -106,11 +166,11 @@ class Describer:
                 time.sleep(wait if wait is not None else min(30.0, 2 * 2 ** attempt) * (0.75 + random.random() / 2))
         raise last  # type: ignore[misc]
 
-    def _call_waiting(self, messages: list[dict]) -> tuple[str, str, dict]:
+    def _call_waiting(self, request: tuple[str, dict, dict]) -> tuple[str, str, dict]:
         """`_call`, but a rate/usage limit pauses (up to ~6 h in total) instead of failing."""
         for wait in QUOTA_WAITS + [None]:
             try:
-                return self._call(messages)
+                return self._call(request)
             except DescribeError as e:
                 if not e.is_quota or wait is None:
                     raise
@@ -126,17 +186,11 @@ class Describer:
         hints = "\n".join(f"- {k}: {v}" for k, v in context.items() if v)
         # Fixed instructions first (the same bytes on every call, so the
         # provider can cache them), then the image, then this file's details.
-        messages = [
-            {"role": "system", "content": INSTRUCTIONS},
-            {"role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                {"type": "text", "text": f"File context (a hint; trust the pixels):\n{hints}" if hints else "Catalog this image."},
-            ]},
-        ]
+        request = self._request(INSTRUCTIONS, b64, f"File context (a hint; trust the pixels):\n{hints}" if hints else "Catalog this image.")
         usages: list[dict] = []
         reason = ""
         for _ in range(2):
-            text, finish, usage = self._call_waiting(messages)
+            text, finish, usage = self._call_waiting(request)
             usages.append(usage)
             try:
                 return ic.clean_analysis(ic.extract_json(text), CATEGORIES), usages

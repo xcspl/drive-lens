@@ -27,7 +27,7 @@ frame stays (the full run uses it).
   (10%, 30%, 50%, 70%, 90% of the length, so not the first or last frame),
   with ffmpeg; drop the download right after. 1024 px, like the photo
   previews.
-- **Words.** One MiniMax call with the five frames in order, plus the file
+- **Words.** One describer call with the five frames in order, plus the file
   name and folder as now; the description covers the whole video.
 - **Vectors.** One EmbeddingGemma 2 vector per frame. The vector table gets
   several rows per video (a frame number next to the file's rowid), and a
@@ -38,7 +38,7 @@ frame stays (the full run uses it).
   videos already done, so photos are not touched.
 
 **Costs to check first.** The download size of all videos (the anonymous
-listing has no sizes: measure on a sample), MiniMax input tokens (about five
+listing has no sizes: measure on a sample), describer input tokens (about five
 images per video instead of one: roughly +5–8M tokens for ~1,400 videos),
 and Mac time. Videos whose owner turned off downloads cannot be fetched:
 they keep Drive's frame, or stay skipped as now.

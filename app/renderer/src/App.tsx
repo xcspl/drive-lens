@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import type { IndexInfo, ModelState, Result } from "./lens";
 
 const KINDS: Array<[string, string]> = [["", "All"], ["image", "Photos"], ["video", "Videos"], ["pdf", "PDFs"], ["document", "Documents"], ["other", "Other"]];
-const EXAMPLES = ["elephant ivory seizure", "rangers training in the forest", "bear cubs in a cage", "film festival poster", "annual report"];
 const WHY_LABEL: Record<string, string> = { all: "all words", near: "words together", any: "some words" };
 const BROWSE_PAGE = 120;
 const KIND_LABEL: Record<string, string> = { image: "Photo", video: "Video", pdf: "PDF", document: "Document", other: "File" };
@@ -123,10 +122,10 @@ export default function App() {
         )}
         {info && !q.trim() && (
           <div>
-            <div className="mx-auto mb-5 flex max-w-3xl flex-wrap items-center justify-center gap-2 text-xs text-mute">
+            {info.examples?.length > 0 && <div className="mx-auto mb-5 flex max-w-3xl flex-wrap items-center justify-center gap-2 text-xs text-mute">
               Try
-              {EXAMPLES.map((x) => <button key={x} onClick={() => setQ(x)} className="rounded-full border border-line px-3 py-1 hover:border-accent hover:text-ink">{x}</button>)}
-            </div>
+              {info.examples.map((x) => <button key={x} onClick={() => setQ(x)} className="rounded-full border border-line px-3 py-1 hover:border-accent hover:text-ink">{x}</button>)}
+            </div>}
             <p className="mb-3 text-xs text-mute">
               Browsing {browsed.total.toLocaleString()} {kind ? KINDS.find(([k]) => k === kind)?.[1].toLowerCase() : "files"}{all ? "" : " looked at so far"}, by folder
               {info.lockedFolders.length > 0 && <> · {info.lockedFolders.length} folders are not shared with the link and are not searched</>}

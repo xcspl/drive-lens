@@ -3,7 +3,7 @@
   "productName": "Drive Lens",
   "version": "0.1.0",
   "description": "Search a drive-lens index: find any file in a shared Google Drive by what it shows.",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "private": true,
   "type": "module",
   "main": "electron/main.js",

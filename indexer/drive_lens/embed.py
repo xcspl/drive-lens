@@ -1,10 +1,15 @@
-"""Vectors: EmbeddingGemma 2, run locally (Apple GPU, NVIDIA GPU, or CPU).
+"""Vectors: a multimodal sentence-transformers model run locally (Apple
+GPU, NVIDIA GPU, or CPU). DRIVE_LENS_EMBED_MODEL picks it; the default is
+EmbeddingGemma 2. The model must embed images and text into one space (the
+image is what gets indexed, the query is words); the vector width comes
+from the model.
 
-Images are embedded as pixels; a PDF as its preview plus its text. Queries
-use the model's "SearchQuery" prompt. float32 by default; DRIVE_LENS_DTYPE=
-bfloat16 halves the weights (~1.5 GB) for small machines — the model card
-warns against float16 only. The search app uses the ONNX build of the same
-model, so vectors stay comparable.
+Images are embedded as pixels; a PDF as its preview plus its text (where the
+model takes both at once, else the preview alone). Queries use the model's
+"SearchQuery" prompt when it has one. float32 by default; DRIVE_LENS_DTYPE=
+bfloat16 halves the weights (~1.5 GB for EmbeddingGemma 2) for small
+machines. The search app embeds queries with the ONNX build of the same
+model (DRIVE_LENS_QUERY_MODEL), so vectors stay comparable.
 
 On Apple GPUs PyTorch keeps freed blocks cached and that cache grows batch
 after batch (an 8 GB M1 ended with 6.3 GB wired and the rest swapping), so
@@ -37,6 +42,15 @@ class Embedder:
         self.device = device or pick_device()
         self._model = None
 
+    model_id = MODEL_ID
+
+    @property
+    def dims(self) -> int:
+        return int(self.model.get_sentence_embedding_dimension())
+
+    def _prompt(self, name: str) -> str | None:
+        return name if name in (getattr(self.model, "prompts", None) or {}) else None
+
     @property
     def label(self) -> str:
         return f"{MODEL_ID} ({self.device}{'' if DTYPE == 'float32' else ', ' + DTYPE})"
@@ -61,11 +75,14 @@ class Embedder:
                 out[i] = row
         words = [i for i, im in enumerate(images) if im is None]
         if words:
-            for i, row in zip(words, self.model.encode([texts[i] for i in words], prompt_name="Document", normalize_embeddings=True)):
+            for i, row in zip(words, self.model.encode([texts[i] for i in words], prompt_name=self._prompt("Document"), normalize_embeddings=True)):
                 out[i] = row
         for i, (im, t) in enumerate(zip(images, texts)):
             if im is not None and t:
-                out[i] = self.model.encode([{"text": f"<|image|> text: {t}", "image": [im]}], normalize_embeddings=True)[0]
+                try:  # picture and words in one input (EmbeddingGemma 2's interleaved format)
+                    out[i] = self.model.encode([{"text": f"<|image|> text: {t}", "image": [im]}], normalize_embeddings=True)[0]
+                except Exception:  # a model without mixed inputs: the picture alone
+                    out[i] = self.model.encode([im], normalize_embeddings=True)[0]
         self.release()
         return np.stack(out).astype(np.float32)
 
@@ -79,4 +96,4 @@ class Embedder:
             torch.cuda.empty_cache()
 
     def query(self, text: str) -> np.ndarray:
-        return self.model.encode(text, prompt_name="SearchQuery", normalize_embeddings=True).astype(np.float32)
+        return self.model.encode(text, prompt_name=self._prompt("SearchQuery"), normalize_embeddings=True).astype(np.float32)

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "drive-lens"
 version = "0.1.0"
 description = "Index a shared Google Drive folder (descriptions by a vision model, EmbeddingGemma 2 vectors, SQLite + sqlite-vec + FTS5) so any file can be found by what it shows."
-license = "MIT"
+license = "GPL-3.0-or-later"
 requires-python = ">=3.10"
 dependencies = [
   "image-classify @ git+https://github.com/xcspl/image-classify.git",

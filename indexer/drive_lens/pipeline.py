@@ -102,7 +102,9 @@ def process(conn, source: AnonymousSource, embedder: Embedder, describer: Descri
     rows = store.todo(conn, kinds=kinds, limit=limit, retry_errors=retry_errors, sample=sample, retry_skipped=retry_skipped)
     total = len(rows)
     log(f"{total} files to process ({', '.join(kinds)}); describer: {describer.label if describer else 'off'}; embedder: {embedder.label}")
-    store.set_meta(conn, embed_model=embedder.label, describe_model=describer.label if describer else "", dims=store.DIMS)
+    if total:
+        store.ensure_vec(conn, embedder.dims, embedder.model_id)
+    store.set_meta(conn, embed_model=embedder.label, describe_model=describer.label if describer else "")
     done = failed = skipped = 0
     t0 = time.time()
     embed_secs = 0.0

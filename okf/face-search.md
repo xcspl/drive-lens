@@ -77,4 +77,4 @@ rangers, community members, children and people from enforcement cases.
   handed to Drive users does not become a face database.
 - Detected faces of children are not kept (or the pass skips photos the
   describer marked `sensitive`) — to be decided.
-- Freeland (the data owner) agrees to it first.
+- The Drive's owner agrees to it first.

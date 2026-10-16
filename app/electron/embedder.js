@@ -1,44 +1,79 @@
-// Query embeddings for search: EmbeddingGemma 2's text model (ONNX), the
-// same model the indexer uses, so query vectors land in the index's space.
-// Runs in Node (Electron's main process) on the CPU; ~314 MB at q8, fetched
-// from Hugging Face on first use and cached.
+// Query embeddings for search: the text side of the model the indexer used
+// (ONNX), so query vectors land in the index's space. Runs in Node
+// (Electron's main process) on the CPU; fetched from Hugging Face on first
+// use and cached.
+//
+// Default: EmbeddingGemma 2's ONNX build (~314 MB at q8), matching the
+// indexer's default google/embeddinggemma-2. Another model is set with
+// DRIVE_LENS_QUERY_MODEL (and its query prompt with DRIVE_LENS_QUERY_PREFIX);
+// it must be the same model the index was built with.
 import { AutoConfig, AutoModel, AutoTokenizer, Tensor, env } from "@huggingface/transformers";
 
-export const MODEL_ID = "onnx-community/embeddinggemma-2-ONNX";
-// The model's "SearchQuery" prompt (config_sentence_transformers.json).
-const QUERY_PREFIX = "task: search result | query: ";
+export const DEFAULT_MODEL = "onnx-community/embeddinggemma-2-ONNX";
+// EmbeddingGemma's "SearchQuery" prompt (config_sentence_transformers.json).
+const DEFAULT_PREFIX = "task: search result | query: ";
 
 let state = null;
+let modelId = DEFAULT_MODEL;
+let prefix = DEFAULT_PREFIX;
 
-/** Load once. `cacheDir`: where the model files go; `onProgress` gets transformers.js progress events. */
-export function loadEmbedder({ dtype = "q8", cacheDir, onProgress } = {}) {
+/** Load once. `model`/`queryPrefix` override the defaults; `cacheDir`: where
+ *  the model files go; `onProgress` gets transformers.js progress events. */
+export function loadEmbedder({ model, queryPrefix, dtype = "q8", cacheDir, onProgress } = {}) {
   if (state) return state;
+  if (model) modelId = model;
+  // .env values lose trailing spaces; a prompt ends in one.
+  if (queryPrefix !== undefined) prefix = queryPrefix && !queryPrefix.endsWith(" ") ? queryPrefix + " " : queryPrefix;
+  else if (model && model !== DEFAULT_MODEL) prefix = "";
   if (cacheDir) env.cacheDir = cacheDir;
   env.allowRemoteModels = true;
   state = (async () => {
-    const config = await AutoConfig.from_pretrained(MODEL_ID);
+    const config = await AutoConfig.from_pretrained(modelId);
     config.vision_config = config.audio_config = null; // text only: queries are words
-    const [tokenizer, model] = await Promise.all([
-      AutoTokenizer.from_pretrained(MODEL_ID),
-      AutoModel.from_pretrained(MODEL_ID, { config, device: "cpu", dtype, progress_callback: onProgress }),
+    const [tokenizer, m] = await Promise.all([
+      AutoTokenizer.from_pretrained(modelId),
+      AutoModel.from_pretrained(modelId, { config, device: "cpu", dtype, progress_callback: onProgress }),
     ]);
-    return { tokenizer, model };
+    return { tokenizer, model: m };
   })();
   state.catch(() => { state = null; });
   return state;
 }
 
-/** A normalized 768-d query vector (Float32Array). */
+export const queryModel = () => modelId;
+
+/** A normalized query vector (Float32Array), as wide as the model makes them. */
 export async function embedQuery(text) {
   const { tokenizer, model } = await loadEmbedder();
-  const inputs = await tokenizer([QUERY_PREFIX + text], { padding: true, truncation: true });
-  // The exported graph takes image/video/audio features too; a query has none.
-  const none = () => new Tensor("float32", new Float32Array(0), [0, 512]);
-  const { sentence_embedding } = await model({ ...inputs, image_features: none(), video_features: none(), audio_features: none() });
-  const v = new Float32Array(sentence_embedding.data.slice(0, 768));
+  const inputs = await tokenizer([prefix + text], { padding: true, truncation: true });
+  // Multimodal graphs (EmbeddingGemma 2's) also take image/video/audio
+  // features; a query has none, so those inputs get empty tensors.
+  const names = Object.values(model.sessions || {})[0]?.inputNames || [];
+  for (const n of names) if (!(n in inputs) && n.endsWith("_features")) inputs[n] = new Tensor("float32", new Float32Array(0), [0, 512]);
+  const out = await model(inputs);
+  const v = pooled(out, inputs.attention_mask);
   let n = 0;
   for (const x of v) n += x * x;
   n = Math.sqrt(n) || 1;
   for (let i = 0; i < v.length; i++) v[i] /= n;
+  return v;
+}
+
+/** The sentence vector of one input: the model's own pooled output when it
+ *  has one, else the mean of the token vectors. */
+function pooled(out, mask) {
+  const t = out.sentence_embedding || out.text_embeds || out.embeddings || out.pooler_output;
+  if (t) return new Float32Array(t.data.slice(0, t.dims[t.dims.length - 1]));
+  const h = out.last_hidden_state;
+  if (!h) throw new Error(`the query model returned none of the expected outputs (${Object.keys(out).join(", ")})`);
+  const [, len, dim] = h.dims;
+  const v = new Float32Array(dim);
+  let count = 0;
+  for (let i = 0; i < len; i++) {
+    if (mask && Number(mask.data[i]) === 0) continue;
+    count++;
+    for (let j = 0; j < dim; j++) v[j] += h.data[i * dim + j];
+  }
+  for (let j = 0; j < dim; j++) v[j] /= count || 1;
   return v;
 }
