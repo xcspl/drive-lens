@@ -324,7 +324,7 @@ npm run dist        # build the window, fetch the query model into app/models/, 
 
 | System | What you get |
 |---|---|
-| Windows | `Drive-Lens-…-win-x64.exe`: a portable app, one file, no install. Also `Drive-Lens-Setup-…-x64.exe`, an installer (NSIS). |
+| Windows | `Drive-Lens-…-win-x64.exe`: a portable app, one file, no install. (For an installer too, add `"nsis"` to `build.win.target` in `app/package.json`.) |
 | macOS | `Drive-Lens-…-mac-arm64.dmg` |
 | Linux | `Drive-Lens-…-linux-x86_64.AppImage`: one file, no install. |
 

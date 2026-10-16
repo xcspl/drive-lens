@@ -75,20 +75,13 @@
     ],
     "win": {
       "target": [
-        "portable",
-        "nsis"
+        "portable"
       ],
       "files": [
         "!**/node_modules/onnxruntime-node/bin/napi-v*/{darwin,linux}/**",
         "!**/node_modules/onnxruntime-node/bin/napi-v*/win32/arm64/**"
       ],
       "icon": "build/icon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "artifactName": "Drive-Lens-Setup-${version}-${arch}.${ext}"
     },
     "mac": {
       "target": [
